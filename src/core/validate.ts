@@ -11,9 +11,31 @@ import {
   maxElementId,
 } from "./surgery.js"
 
+/**
+ * A stable identifier for each message this module can produce.
+ *
+ * `detail` is English prose, ready to print. `code` and `values` are the same
+ * message taken apart, so a consumer can render it in another language without
+ * parsing English — which is the only alternative, and a fragile one. Codes are
+ * part of the public contract: renaming one is a breaking change.
+ */
+export type ValidationCode =
+  | "orphan_pointee"
+  | "grid_slot_count"
+  | "xml_mismatched_close"
+  | "xml_unclosed"
+  | "xml_duplicate_singleton"
+  | "next_pointee_missing"
+  | "next_pointee_too_low"
+  | "routing_orphan_tracks"
+
 export type ValidationProblem = {
   readonly rule: "grid" | "xml" | "ids" | "routing"
+  /** English prose, ready to print. */
   readonly detail: string
+  readonly code: ValidationCode
+  /** The values interpolated into `detail`, kept separate for localization. */
+  readonly values: Readonly<Record<string, string | number>>
 }
 
 export function validateGeneratedSet(
@@ -52,6 +74,8 @@ function checkPointeeReferences(xml: string): readonly ValidationProblem[] {
     : [
         {
           rule: "ids",
+          code: "orphan_pointee",
+          values: { ids: orphans.join(", ") },
           detail: `orphan PointeeId (clip automation target does not exist): ${orphans.join(", ")}`,
         },
       ]
@@ -66,6 +90,13 @@ function checkGrid(xml: string): readonly ValidationProblem[] {
       : [
           {
             rule: "grid" as const,
+            code: "grid_slot_count" as const,
+            values: {
+              list: index,
+              track: list.trackName,
+              slots: list.slots.length,
+              scenes: sceneCount,
+            },
             detail: `list ${index} ("${list.trackName}") has ${list.slots.length} slots for ${sceneCount} scenes`,
           },
         ]
@@ -91,6 +122,12 @@ function checkXmlWellFormed(xml: string): readonly ValidationProblem[] {
         return [
           {
             rule: "xml",
+            code: "xml_mismatched_close",
+            values: {
+              closing: name!,
+              open: open ?? "nothing",
+              offset: match.index,
+            },
             detail: `</${name}> closes <${open ?? "nothing"}> at offset ${match.index}`,
           },
         ]
@@ -104,6 +141,8 @@ function checkXmlWellFormed(xml: string): readonly ValidationProblem[] {
     : [
         {
           rule: "xml",
+          code: "xml_unclosed",
+          values: { tags: stack.join(" > ") },
           detail: `tags opened and never closed: ${stack.join(" > ")}`,
         },
       ]
@@ -153,6 +192,12 @@ function checkSingletonMembers(xml: string): readonly ValidationProblem[] {
         if (seen === 2) {
           problems.push({
             rule: "xml",
+            code: "xml_duplicate_singleton",
+            values: {
+              element: name!,
+              parent: parent.name,
+              offset: match.index,
+            },
             detail: `<${name}> duplicated inside <${parent.name}> at offset ${match.index}`,
           })
         }
@@ -166,7 +211,14 @@ function checkSingletonMembers(xml: string): readonly ValidationProblem[] {
 function checkIds(xml: string): readonly ValidationProblem[] {
   const declared = /<NextPointeeId Value="(\d+)" \/>/.exec(xml)
   if (!declared) {
-    return [{ rule: "ids", detail: "NextPointeeId missing" }]
+    return [
+      {
+        rule: "ids",
+        code: "next_pointee_missing",
+        values: {},
+        detail: "NextPointeeId missing",
+      },
+    ]
   }
   const max = maxElementId(xml)
   return Number(declared[1]) > max
@@ -174,6 +226,8 @@ function checkIds(xml: string): readonly ValidationProblem[] {
     : [
         {
           rule: "ids",
+          code: "next_pointee_too_low",
+          values: { declared: declared[1]!, max },
           detail: `NextPointeeId ${declared[1]} is not greater than the file's highest Id (${max})`,
         },
       ]
@@ -198,6 +252,8 @@ function checkTrackReferences(xml: string): readonly ValidationProblem[] {
     : [
         {
           rule: "routing",
+          code: "routing_orphan_tracks",
+          values: { ids: [...orphans].join(", ") },
           detail: `references to nonexistent tracks: ${[...orphans].join(", ")}`,
         },
       ]

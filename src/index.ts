@@ -99,6 +99,7 @@ export {
   toV10Chance,
   v10ColorIndex,
   v10SceneName,
+  type DowngradeCode,
   type DowngradeOptions,
   type DowngradeResult,
   type DowngradeWarning,
@@ -113,5 +114,6 @@ export {
 
 export {
   validateGeneratedSet,
+  type ValidationCode,
   type ValidationProblem,
 } from "./core/validate.js"

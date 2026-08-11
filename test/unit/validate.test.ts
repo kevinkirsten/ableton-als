@@ -90,6 +90,36 @@ describe("validateGeneratedSet", () => {
     expect(grid!.detail).toContain("1 slots for 2 scenes")
   })
 
+  it("carries the message taken apart, so a consumer can localize it", () => {
+    // `detail` is English prose. A consumer that does not print English needs
+    // the same message as a stable code plus its values — parsing the prose is
+    // the only alternative, and it breaks on any wording change.
+    const ragged = buildDocument({
+      tracks: track(10, "CLICK", 2, 2) + track(11, "LEAD", 2, 1),
+    })
+    const grid = validateGeneratedSet(ragged).find(
+      (problem) => problem.rule === "grid"
+    )
+    expect(grid!.code).toBe("grid_slot_count")
+    expect(grid!.values).toEqual({
+      list: 3,
+      track: "LEAD",
+      slots: 1,
+      scenes: 2,
+    })
+  })
+
+  it("every value it interpolates appears in values", () => {
+    // The invariant that keeps a localized render from losing information: no
+    // number or name may exist only inside the prose.
+    const problems = validateGeneratedSet(buildDocument({ nextPointeeId: 5 }))
+    const ids = problems.find((problem) => problem.code === "next_pointee_too_low")
+    expect(ids).toBeDefined()
+    for (const value of Object.values(ids!.values)) {
+      expect(ids!.detail).toContain(String(value))
+    }
+  })
+
   it("NextPointeeId must be greater than the file's highest Id", () => {
     const problems = validateGeneratedSet(buildDocument({ nextPointeeId: 5 }))
     const ids = problems.find((problem) => problem.rule === "ids")

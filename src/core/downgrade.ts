@@ -30,9 +30,21 @@ const V10_HEADER =
 
 const ABLETON_TAG = /<Ableton[^>]*>/
 
+/**
+ * A stable identifier for each warning. `detail` is English prose, ready to
+ * print; `code` and `values` are the same message taken apart, so a consumer
+ * can render it in another language without parsing English. Codes are part of
+ * the public contract.
+ */
+export type DowngradeCode = "jump_follow_action" | "samples_outside_root"
+
 export type DowngradeWarning = {
   readonly kind: "follow_action" | "sample_ref" | "unknown_element"
+  /** English prose, ready to print. */
   readonly detail: string
+  readonly code: DowngradeCode
+  /** The values interpolated into `detail`, kept separate for localization. */
+  readonly values: Readonly<Record<string, string | number>>
 }
 
 export type DowngradeResult =
@@ -1058,6 +1070,8 @@ export function convertFollowActions(xml: string): {
     if (enabled && (declaredA === JUMP || declaredB === JUMP)) {
       warnings.push({
         kind: "follow_action",
+        code: "jump_follow_action",
+        values: {},
         detail:
           'a clip uses the "Jump" follow action, which does not exist in Live 10 — it became "No Action" and must be redone by hand',
       })
@@ -1246,6 +1260,11 @@ export function convertFileRefs(
   if (unresolved.size > 0) {
     warnings.push({
       kind: "sample_ref",
+      code: "samples_outside_root",
+      values: {
+        count: unresolved.size,
+        sample: [...unresolved].slice(0, 3).join(", "),
+      },
       detail: `${unresolved.size} audio file(s) outside the library root — the relative path could not be built: ${[
         ...unresolved,
       ]

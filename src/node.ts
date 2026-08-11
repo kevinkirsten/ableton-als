@@ -31,6 +31,7 @@ export {
   applyAlsTools,
   diagnoseAls,
   type ApplyReport,
+  type BlockedCode,
   type Diagnosis,
   type Operation,
   type ToolAvailability,

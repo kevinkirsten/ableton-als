@@ -7,9 +7,16 @@
 // ---------------------------------------------------------------------------
 
 import { gunzipSync, gzipSync } from "node:zlib"
-import { downgradeToV10, majorVersionOf } from "../core/downgrade.js"
+import {
+  downgradeToV10,
+  majorVersionOf,
+  type DowngradeWarning,
+} from "../core/downgrade.js"
 import { parseAlsDocument } from "../core/document.js"
-import { validateGeneratedSet } from "../core/validate.js"
+import {
+  validateGeneratedSet,
+  type ValidationProblem,
+} from "../core/validate.js"
 import {
   MAX_UPLOAD_BYTES,
   fileCreatedAt as fileCreatedAtFromDisk,
@@ -27,18 +34,12 @@ export type ConversionReport = {
   readonly scenes: number
   readonly tracks: number
   readonly scenesConverted: number
-  readonly warnings: readonly {
-    readonly kind: string
-    readonly detail: string
-  }[]
+  readonly warnings: readonly DowngradeWarning[]
   /**
    * Validation failures. A non-empty list means a file Live 10 refuses — or
    * worse, accepts and takes down mid-load.
    */
-  readonly problems: readonly {
-    readonly rule: string
-    readonly detail: string
-  }[]
+  readonly problems: readonly ValidationProblem[]
 }
 
 export type ConversionResult =
@@ -100,14 +101,8 @@ export function convertAlsToV10(input: {
       scenes: document.scenes.length,
       tracks: document.tracks.length,
       scenesConverted: result.scenesConverted,
-      warnings: result.warnings.map((item) => ({
-        kind: item.kind,
-        detail: item.detail,
-      })),
-      problems: problems.map((item) => ({
-        rule: item.rule,
-        detail: item.detail,
-      })),
+      warnings: result.warnings,
+      problems,
     },
   }
 }
