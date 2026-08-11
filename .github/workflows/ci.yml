@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The core is what makes this library run in a browser. A single `node:`
+      # import or npm package in there silently takes that away, so it fails
+      # the build rather than being caught by a reviewer who happened to look.
+      - name: Core must import nothing but relative paths
+        run: |
+          if grep -rnE '^\s*(import|export) .* from "(node:|[^./])' src/core src/index.ts; then
+            echo "::error::the core imports a package or a node: builtin — it must not"
+            exit 1
+          fi
+
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      # Catches an `exports` map or a `files` list that stopped matching what
+      # was actually built. Cheap, and only ever fails for a real reason.
+      - name: The package contains what it claims
+        run: npm pack --dry-run

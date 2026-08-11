@@ -1,0 +1,58 @@
+name: Release
+
+# Publishes to npm with provenance — a signed attestation linking the published
+# tarball to this repository, this commit and this workflow run. It can only be
+# produced by CI over OIDC, which is the whole point: it proves the package was
+# built from public source rather than from someone's laptop.
+#
+# Requires trusted publishing to be configured for the package on npmjs.com
+# first, which in turn requires the package to already exist — hence the manual
+# `0.0.0` bootstrap that precedes the first run of this workflow.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC; without it there is no provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # Never publish something that does not pass its own gates.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      # The tag and package.json must agree, or a `v0.2.0` tag quietly ships
+      # whatever version happened to be committed.
+      - name: Tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(node -p "require('./package.json').version")"
+          if [ "$tagged" != "$declared" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json $declared"
+            exit 1
+          fi
+
+      # Trusted publishing needs a recent npm; the one bundled with Node is
+      # usually older than the feature.
+      - run: npm install -g npm@latest
+
+      - run: npm publish --provenance --access public

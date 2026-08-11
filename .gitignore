@@ -1,0 +1,32 @@
+node_modules/
+.idea/
+.vscode/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+
+# Working documents, not deliverables. They hold competitor analysis, local
+# filesystem paths, references to the private application this was extracted
+# from, and draft launch posts.
+#
+# Ignored from the very first commit on purpose: a public repository keeps its
+# history, so "we'll strip it later" is not a thing.
+#
+# The whole folder is out for now, deliberately. When a document is written to
+# be READ by strangers — docs/FORMAT.md is the one that is planned — un-ignore
+# that file explicitly rather than opening the folder back up.
+docs/
+
+# The working agreement for agents editing this repo. Useful, and not secret,
+# but it currently points at the private specs above and reads like notes to
+# self. It ships once it is written for an audience.
+CLAUDE.md
+
+# Real-world fixtures. Third-party .als files are commercial content and never
+# belong here; public fixtures are synthetic or reduced, and live under
+# test/fixtures.
+*.als
+!test/fixtures/**/*.als

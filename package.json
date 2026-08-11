@@ -1,0 +1,74 @@
+{
+  "name": "ableton-als",
+  "version": "0.0.0",
+  "description": "Read, edit, validate and version-convert Ableton Live Set (.als) files. Zero dependencies — runs in Node, Deno, Bun, Workers and the browser.",
+  "keywords": [
+    "ableton",
+    "ableton-live",
+    "als",
+    "live-set",
+    "daw",
+    "music-production",
+    "audio",
+    "parser",
+    "xml",
+    "gzip",
+    "live-10",
+    "live-12",
+    "downgrade",
+    "backwards-compatibility",
+    "zero-dependency",
+    "browser"
+  ],
+  "license": "MIT",
+  "author": "Kevin Kirsten Lucas (https://github.com/kevinkirsten)",
+  "homepage": "https://github.com/kevinkirsten/ableton-als#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kevinkirsten/ableton-als.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kevinkirsten/ableton-als/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./web": {
+      "types": "./dist/web.d.ts",
+      "default": "./dist/web.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsdown": "^0.15.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
