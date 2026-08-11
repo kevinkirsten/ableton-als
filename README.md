@@ -1,5 +1,11 @@
 # ableton-als
 
+[![npm](https://img.shields.io/npm/v/ableton-als?color=cb3837&logo=npm)](https://www.npmjs.com/package/ableton-als)
+[![CI](https://github.com/kevinkirsten/ableton-als/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinkirsten/ableton-als/actions/workflows/ci.yml)
+[![dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
+[![types](https://img.shields.io/npm/types/ableton-als)](./package.json)
+[![license](https://img.shields.io/npm/l/ableton-als?color=blue)](./LICENSE)
+
 **Read, edit, validate and version-convert Ableton Live Set (`.als`) files — in Node or directly in the browser, with zero dependencies.**
 
 Its headline feature: **convert a Live 12 set into a file Live 10 can open.** Ableton offers no downgrade path — a set saved in a newer Live simply refuses to open in an older one. This library builds the file the older Live expects.
