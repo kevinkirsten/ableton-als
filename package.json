@@ -1,6 +1,6 @@
 {
   "name": "ableton-als",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Read, edit, validate and version-convert Ableton Live Set (.als) files. Zero dependencies — runs in Node, Deno, Bun, Workers and the browser.",
   "keywords": [
     "ableton",
