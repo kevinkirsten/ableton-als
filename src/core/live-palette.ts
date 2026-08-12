@@ -88,6 +88,27 @@ const LIVE_PALETTE: readonly string[] = [
   "#3C3C3C",
 ]
 
+declare const paletteIndexBrand: unique symbol
+
+/**
+ * A palette index — `0..69`, which is what a v10 **clip** stores.
+ *
+ * Branded on purpose, and this is the one place in the library where a brand
+ * earns its keep. v10 writes the same colour two ways: a **track or scene**
+ * uses the shifted ranges (140..199 and 278..287), a **clip** uses the raw
+ * index. Both are plain numbers, so nothing but a type can stop one being
+ * written where the other belongs — and the consequence is not a wrong colour.
+ * It is an out-of-range value in a field Live KNOWS, which passes every
+ * validation and then takes Live 10 down at load, with no message.
+ *
+ * The only way to obtain one is `paletteIndexFromFileColor` — which is exactly
+ * the conversion that prevents the crash. That is the point of the brand: the
+ * compiler now demands the call a person can forget.
+ */
+export type PaletteIndex = number & {
+  readonly [paletteIndexBrand]: "PaletteIndex"
+}
+
 /**
  * The hex of a scene/track color from the index as it sits IN THE v10 FILE.
  * `null` = no color (v10 writes 0) or an index outside the known ranges.
@@ -120,11 +141,17 @@ export function liveColorHex(
  */
 export function paletteIndexFromFileColor(
   colorIndex: number | null | undefined
-): number | null {
+): PaletteIndex | null {
   if (colorIndex == null) return null
-  if (colorIndex >= 0 && colorIndex < LIVE_PALETTE.length) return colorIndex
-  if (colorIndex >= 140 && colorIndex <= 199) return colorIndex - 140
-  if (colorIndex >= 278 && colorIndex <= 287) return colorIndex - 218
+  if (colorIndex >= 0 && colorIndex < LIVE_PALETTE.length) {
+    return colorIndex as PaletteIndex
+  }
+  if (colorIndex >= 140 && colorIndex <= 199) {
+    return (colorIndex - 140) as PaletteIndex
+  }
+  if (colorIndex >= 278 && colorIndex <= 287) {
+    return (colorIndex - 218) as PaletteIndex
+  }
   return null
 }
 

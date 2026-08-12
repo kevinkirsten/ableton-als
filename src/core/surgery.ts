@@ -10,6 +10,7 @@
 // comes out byte-for-byte identical.
 // ---------------------------------------------------------------------------
 
+import type { PaletteIndex } from "./live-palette.js"
 import { unescapeXml } from "./document.js"
 
 export type Edit = {
@@ -180,10 +181,18 @@ export function clipColorIndex(clipSlotXml: string): number | null {
   return match ? Number(match[1]) : null
 }
 
-/** Rewrites the clip's `ColorIndex`; an empty slot comes out untouched. */
+/**
+ * Rewrites the clip's `ColorIndex`; an empty slot comes out untouched.
+ *
+ * Takes a `PaletteIndex`, not a number, and that is deliberate: a clip stores
+ * the RAW palette index while a track or scene stores a shifted one. Writing a
+ * track-shaped index here produces a value Live knows the field for but not
+ * the range — it validates clean and kills Live 10 at load. The brand makes
+ * the caller go through `paletteIndexFromFileColor` first.
+ */
 export function withClipColorIndex(
   clipSlotXml: string,
-  colorIndex: number
+  colorIndex: PaletteIndex
 ): string {
   return clipSlotXml.replace(
     CLIP_COLOR_INDEX,

@@ -8,6 +8,16 @@ import {
   removeScenes,
   withClipColorIndex,
 } from "../../src/core/surgery.js"
+import { paletteIndexFromFileColor } from "../../src/core/live-palette.js"
+
+/**
+ * The only way to get a `PaletteIndex`, and deliberately so: the converter is
+ * the step that stops a track-shaped index being written into a clip. A test
+ * that reached for `as PaletteIndex` would be testing something else.
+ */
+function palette(value: number) {
+  return paletteIndexFromFileColor(value)!
+}
 
 // A fixture with the same anatomy as the real files: inner ClipSlot without an
 // Id, freeze list BEFORE the session one, and scenes in the v10 schema (name
@@ -77,12 +87,12 @@ describe("clip color", () => {
   it("an empty slot has no color and gains none", () => {
     const empty = `<ClipSlot Id="7"><LomId Value="0" /><ClipSlot><Value /></ClipSlot><HasStop Value="true" /></ClipSlot>`
     expect(clipColorIndex(empty)).toBeNull()
-    expect(withClipColorIndex(empty, 8)).toBe(empty)
+    expect(withClipColorIndex(empty, palette(8))).toBe(empty)
   })
 
   it("rewrites only the segment's first ColorIndex", () => {
     const doubled = `${COLORED_SLOT}${COLORED_SLOT}`
-    const painted = withClipColorIndex(doubled, 8)
+    const painted = withClipColorIndex(doubled, palette(8))
     expect(
       [...painted.matchAll(/<ColorIndex Value="(\d+)"/g)].map(
         (match) => match[1]
@@ -93,7 +103,7 @@ describe("clip color", () => {
   it("does not re-escape what already came escaped from the file", () => {
     // The name's `&amp;` passes through untouched — re-escaping would turn it
     // into `&amp;amp;`, the bug that hit 1,998 clips in the porter.
-    expect(withClipColorIndex(COLORED_SLOT, 8)).toContain(
+    expect(withClipColorIndex(COLORED_SLOT, palette(8))).toContain(
       'Value="Every Little Thing_(Y&amp;F)"'
     )
   })

@@ -110,6 +110,7 @@ export {
   isNeutralLiveColor,
   liveColorHex,
   paletteIndexFromFileColor,
+  type PaletteIndex,
 } from "./core/live-palette.js"
 
 export {
