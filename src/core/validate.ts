@@ -19,24 +19,78 @@ import {
  * parsing English — which is the only alternative, and a fragile one. Codes are
  * part of the public contract: renaming one is a breaking change.
  */
-export type ValidationCode =
-  | "orphan_pointee"
-  | "grid_slot_count"
-  | "xml_mismatched_close"
-  | "xml_unclosed"
-  | "xml_duplicate_singleton"
-  | "next_pointee_missing"
-  | "next_pointee_too_low"
-  | "routing_orphan_tracks"
+export type ValidationCode = ValidationProblem["code"]
 
-export type ValidationProblem = {
-  readonly rule: "grid" | "xml" | "ids" | "routing"
+export type ValidationRule = ValidationProblem["rule"]
+
+/**
+ * Each problem carries the values interpolated into its own `detail`, and the
+ * shape of `values` is DETERMINED BY `code`.
+ *
+ * A single `Record<string, string | number>` would compile for any key, so a
+ * consumer localizing these messages could reference `{id}` where the library
+ * sends `{ids}` and only find out when the rendered string showed a raw
+ * placeholder to a user. Narrowing on `code` makes that a type error.
+ */
+type Problem<
+  Rule extends string,
+  Code extends string,
+  Values extends Readonly<Record<string, string | number>>,
+> = {
+  readonly rule: Rule
+  readonly code: Code
+  /** The values interpolated into `detail`, kept separate for localization. */
+  readonly values: Values
   /** English prose, ready to print. */
   readonly detail: string
-  readonly code: ValidationCode
-  /** The values interpolated into `detail`, kept separate for localization. */
-  readonly values: Readonly<Record<string, string | number>>
 }
+
+export type ValidationProblem =
+  /** Clip automation pointing at a target that does not exist. */
+  | Problem<"ids", "orphan_pointee", { readonly ids: string }>
+  /** A ClipSlotList whose slot count does not match the scene count. */
+  | Problem<
+      "grid",
+      "grid_slot_count",
+      {
+        readonly list: number
+        readonly track: string
+        readonly slots: number
+        readonly scenes: number
+      }
+    >
+  /** A closing tag that does not match the tag it closes. */
+  | Problem<
+      "xml",
+      "xml_mismatched_close",
+      {
+        readonly closing: string
+        readonly open: string
+        readonly offset: number
+      }
+    >
+  /** Tags left open at the end of the document. */
+  | Problem<"xml", "xml_unclosed", { readonly tags: string }>
+  /** An element Live 10 demands unique per parent, written twice. */
+  | Problem<
+      "xml",
+      "xml_duplicate_singleton",
+      {
+        readonly element: string
+        readonly parent: string
+        readonly offset: number
+      }
+    >
+  /** No `NextPointeeId` at all. */
+  | Problem<"ids", "next_pointee_missing", Record<never, never>>
+  /** `NextPointeeId` not greater than the highest Id in the file. */
+  | Problem<
+      "ids",
+      "next_pointee_too_low",
+      { readonly declared: string; readonly max: number }
+    >
+  /** Bus routing pointing at a track that does not exist. */
+  | Problem<"routing", "routing_orphan_tracks", { readonly ids: string }>
 
 export function validateGeneratedSet(
   xml: string

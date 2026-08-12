@@ -36,16 +36,30 @@ const ABLETON_TAG = /<Ableton[^>]*>/
  * can render it in another language without parsing English. Codes are part of
  * the public contract.
  */
-export type DowngradeCode = "jump_follow_action" | "samples_outside_root"
+export type DowngradeCode = DowngradeWarning["code"]
 
-export type DowngradeWarning = {
-  readonly kind: "follow_action" | "sample_ref" | "unknown_element"
-  /** English prose, ready to print. */
-  readonly detail: string
-  readonly code: DowngradeCode
-  /** The values interpolated into `detail`, kept separate for localization. */
-  readonly values: Readonly<Record<string, string | number>>
-}
+export type DowngradeKind = DowngradeWarning["kind"]
+
+/**
+ * As with `ValidationProblem`, the shape of `values` is determined by `code`
+ * — a consumer that localizes these gets a type error instead of a raw
+ * placeholder rendered to a user.
+ */
+export type DowngradeWarning =
+  /** A clip used the "Jump" follow action, which Live 10 does not have. */
+  | {
+      readonly kind: "follow_action"
+      readonly code: "jump_follow_action"
+      readonly values: Record<never, never>
+      readonly detail: string
+    }
+  /** Audio outside the library root, so no relative path could be built. */
+  | {
+      readonly kind: "sample_ref"
+      readonly code: "samples_outside_root"
+      readonly values: { readonly count: number; readonly sample: string }
+      readonly detail: string
+    }
 
 export type DowngradeResult =
   | {

@@ -28,27 +28,51 @@ import {
 import { MAX_UPLOAD_BYTES, readXml, safeFileName } from "./shared.js"
 
 /**
- * Why a tool cannot run. `blocked` is English prose; `blockedCode` and
- * `blockedValues` are the same reason taken apart, for a consumer that
- * localizes. Codes are part of the public contract.
+ * Why a tool cannot run: a stable `code`, the `values` that belong to that
+ * code, and the English prose. Codes are part of the public contract.
  */
-export type BlockedCode =
-  | "unsupported_version"
-  | "colliding_pointee_ids"
-  | "needs_two_tracks"
-  | "mixed_clip_durations"
-  | "needs_project_folder"
+/**
+ * Why a tool is unavailable. Each code carries its own values, for the same
+ * reason `ValidationProblem` does: a consumer localizing "this tool does not
+ * run on Live {version} files" needs `version` to exist, and the compiler is
+ * the only thing that can promise it does.
+ */
+export type BlockedReason =
+  | {
+      readonly code: "unsupported_version"
+      readonly values: { readonly version: number | "?" }
+    }
+  | {
+      readonly code: "colliding_pointee_ids"
+      readonly values: { readonly ids: string }
+    }
+  | {
+      readonly code: "needs_two_tracks"
+      readonly values: Record<never, never>
+    }
+  | {
+      readonly code: "mixed_clip_durations"
+      readonly values: { readonly count: number }
+    }
+  | {
+      readonly code: "needs_project_folder"
+      readonly values: Record<never, never>
+    }
+
+export type BlockedCode = BlockedReason["code"]
 
 export type ToolAvailability = {
   readonly id: ToolId
   readonly supported: boolean
   /** How many items the tool would fix. 0 = everything is fine. */
   readonly pending: number
-  /** Why it cannot run right now (version, or the algorithm's own guard). */
-  readonly blocked: string | null
-  readonly blockedCode: BlockedCode | null
-  /** The values interpolated into `blocked`, kept separate for localization. */
-  readonly blockedValues: Readonly<Record<string, string | number>>
+  /**
+   * Why it cannot run right now (version, or the algorithm's own guard), or
+   * `null` when it can. One object instead of three parallel fields: with
+   * `blocked`/`blockedCode`/`blockedValues` side by side, nothing stopped a
+   * prose string from describing one reason while the code named another.
+   */
+  readonly blocked: (BlockedReason & { readonly detail: string }) | null
   /** Per-tool numbers for a UI. */
   readonly detail: Readonly<Record<string, string | number>>
 }
@@ -104,10 +128,13 @@ function diagnose(xml: string, fileName: string): Diagnosis {
 
   // Two different reasons to refuse, and the operator needs to know which: the
   // whole version was never verified, or only this tool does not cover it.
-  const unsupported = () =>
-    isUntestedVersion(version)
+  const unsupported = (): BlockedReason & { detail: string } => ({
+    code: "unsupported_version",
+    values: { version: version.major ?? "?" },
+    detail: isUntestedVersion(version)
       ? `Live ${version.major} files have not been verified yet — no fix runs on them`
-      : `this tool does not yet run on Live ${version.major ?? "?"} files`
+      : `this tool does not yet run on Live ${version.major ?? "?"} files`,
+  })
 
   const tools: ToolAvailability[] = [
     {
@@ -117,17 +144,12 @@ function diagnose(xml: string, fileName: string): Diagnosis {
       blocked: !supportsTool("pointeeIds", version)
         ? unsupported()
         : pointee.collidingReferences.length > 0
-          ? `automation points at a duplicated Id (${pointee.collidingReferences.join(", ")}) — renumbering would attach it to the wrong occurrence`
+          ? {
+              code: "colliding_pointee_ids" as const,
+              values: { ids: pointee.collidingReferences.join(", ") },
+              detail: `automation points at a duplicated Id (${pointee.collidingReferences.join(", ")}) — renumbering would attach it to the wrong occurrence`,
+            }
           : null,
-      blockedCode: !supportsTool("pointeeIds", version)
-        ? "unsupported_version"
-        : pointee.collidingReferences.length > 0
-          ? "colliding_pointee_ids"
-          : null,
-      blockedValues: {
-        version: version.major ?? "?",
-        ids: pointee.collidingReferences.join(", "),
-      },
       detail: {
         targets: pointee.targets,
         duplicatedIds: pointee.duplicatedIds.length,
@@ -143,10 +165,6 @@ function diagnose(xml: string, fileName: string): Diagnosis {
           ? rewarp.clips
           : 0,
       blocked: !supportsTool("rewarp", version) ? unsupported() : null,
-      blockedCode: !supportsTool("rewarp", version)
-        ? "unsupported_version"
-        : null,
-      blockedValues: { version: version.major ?? "?" },
       detail: {
         gridAt: rewarp.gridBpm ?? "—",
         master: rewarp.masterBpm ?? "—",
@@ -160,14 +178,12 @@ function diagnose(xml: string, fileName: string): Diagnosis {
       blocked: !supportsTool("mirrorTrack", version)
         ? unsupported()
         : trackNames.length < 2
-          ? "the file does not have two tracks with clips"
+          ? {
+              code: "needs_two_tracks" as const,
+              values: {},
+              detail: "the file does not have two tracks with clips",
+            }
           : null,
-      blockedCode: !supportsTool("mirrorTrack", version)
-        ? "unsupported_version"
-        : trackNames.length < 2
-          ? "needs_two_tracks"
-          : null,
-      blockedValues: { version: version.major ?? "?" },
       detail: { tracks: trackNames.length },
     },
     {
@@ -180,17 +196,12 @@ function diagnose(xml: string, fileName: string): Diagnosis {
       blocked: !followSupported
         ? unsupported()
         : follow !== null && follow.conflicting.length > 0
-          ? `${follow.conflicting.length} scene(s) have clips with different durations — without a single duration per row there is no way to tell when to jump`
+          ? {
+              code: "mixed_clip_durations" as const,
+              values: { count: follow.conflicting.length },
+              detail: `${follow.conflicting.length} scene(s) have clips with different durations — without a single duration per row there is no way to tell when to jump`,
+            }
           : null,
-      blockedCode: !followSupported
-        ? "unsupported_version"
-        : follow !== null && follow.conflicting.length > 0
-          ? "mixed_clip_durations"
-          : null,
-      blockedValues: {
-        version: version.major ?? "?",
-        count: follow?.conflicting.length ?? 0,
-      },
       detail:
         follow === null
           ? {}
@@ -207,11 +218,11 @@ function diagnose(xml: string, fileName: string): Diagnosis {
       pending: 0,
       blocked: !supportsTool("relinkSamples", version)
         ? unsupported()
-        : "needs the project folder on disk — use a script for now",
-      blockedCode: !supportsTool("relinkSamples", version)
-        ? "unsupported_version"
-        : "needs_project_folder",
-      blockedValues: { version: version.major ?? "?" },
+        : {
+            code: "needs_project_folder" as const,
+            values: {},
+            detail: "needs the project folder on disk — use a script for now",
+          },
       detail: {},
     },
   ]

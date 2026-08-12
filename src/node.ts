@@ -32,6 +32,7 @@ export {
   diagnoseAls,
   type ApplyReport,
   type BlockedCode,
+  type BlockedReason,
   type Diagnosis,
   type Operation,
   type ToolAvailability,

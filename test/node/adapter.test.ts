@@ -84,7 +84,11 @@ describe("diagnoseAls", () => {
       (tool) => tool.id === "relinkSamples"
     )!
     expect(relink.supported).toBe(false)
-    expect(relink.blocked).toContain("Live 12")
+    // The reason is now a code plus its values, not just prose: asserting the
+    // code is what survives a rewording of the sentence.
+    expect(relink.blocked?.code).toBe("unsupported_version")
+    expect(relink.blocked?.values).toEqual({ version: 12 })
+    expect(relink.blocked?.detail).toContain("Live 12")
   })
 
   it("also accepts an `.als` saved raw (not gzipped)", () => {
