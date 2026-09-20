@@ -91,6 +91,12 @@ export {
 } from "./core/clip-envelopes.js"
 
 export {
+  setSceneMidiMappings,
+  type SceneMidiMapping,
+  type SceneMidiResult,
+} from "./core/scene-midi.js"
+
+export {
   relinkFileRefs,
   writeV10FileRef,
   type RelinkOptions,
