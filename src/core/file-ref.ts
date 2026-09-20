@@ -117,10 +117,39 @@ function dirsOf(body: string, tag: string): string[] | null {
   )
 }
 
+export type RelinkOptions = {
+  /**
+   * The file's creation date, for the alias record. Reading the disk is an
+   * effect, so the caller supplies it.
+   */
+  readonly fileCreatedAt?:
+    | ((absolutePath: string) => number | null)
+    | undefined
+  /**
+   * Last word on where the file really is, called for EVERY ref this function
+   * rebuilds. It exists because the document can be stale: a folder renamed or
+   * moved after the `.als` was saved leaves a path that points nowhere, and
+   * only the caller can look at the disk to find out. Return the path to
+   * write, or `null` to keep the rebuilt one.
+   *
+   * Measured in the archive: three songs had their audio moved or their folder
+   * renamed (a key corrected from Ab to Bb, a song filed under its campus),
+   * which was 686 of the 698 clips that still opened greyed out.
+   */
+  readonly locate?:
+    | ((input: {
+        readonly candidate: string
+        readonly fileName: string
+      }) => string | null)
+    | undefined
+}
+
 export type RelinkReport = {
   readonly xml: string
   /** Refs rewritten to point inside `libraryRoot`. */
   readonly relinked: number
+  /** Of those, how many `locate` sent somewhere other than the rebuilt path. */
+  readonly located: number
   /**
    * Refs left untouched because the document does not say where the file sits
    * inside the library. Their names, for the caller to report.
@@ -144,12 +173,13 @@ export type RelinkReport = {
 export function relinkFileRefs(
   xml: string,
   libraryRoot: string,
-  fileCreatedAt?: ((absolutePath: string) => number | null) | undefined
+  options: RelinkOptions = {}
 ): RelinkReport {
   const root = libraryRoot.replace(/\/+$/, "")
   const rootName = root.split("/").filter(Boolean).pop() ?? ""
   const edits: Edit[] = []
   const unresolved: string[] = []
+  let located = 0
 
   FILE_REF.lastIndex = 0
   let match: RegExpExecArray | null
@@ -183,14 +213,16 @@ export function relinkFileRefs(
       continue
     }
 
-    const absolutePath = [root, ...dirs, name].join("/")
+    const candidate = [root, ...dirs, name].join("/")
+    const encontrado = options.locate?.({ candidate, fileName: name }) ?? null
+    if (encontrado !== null && encontrado !== candidate) located++
     const replacement = writeV10FileRef({
       attributes,
-      absolutePath,
+      absolutePath: encontrado ?? candidate,
       type: readValue(body, "Type") ?? "2",
       fileSize: readValue(body, "FileSize") ?? "0",
       crc: readValue(body, "Crc") ?? "0",
-      fileCreatedAt,
+      fileCreatedAt: options.fileCreatedAt,
     })
     if (replacement === match[0]) continue
     edits.push({
@@ -203,6 +235,7 @@ export function relinkFileRefs(
   return {
     xml: applyEdits(xml, edits),
     relinked: edits.length,
+    located,
     unresolved,
   }
 }

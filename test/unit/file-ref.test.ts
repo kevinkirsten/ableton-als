@@ -126,7 +126,9 @@ describe("relinkFileRefs", () => {
 
   it("writes the alias record when the caller can date the file", () => {
     const xml = v10Ref({ relative: ["AUDIO TRACKS"], name: "x.wav" })
-    const report = relinkFileRefs(xml, ROOT, () => 3_800_000_000)
+    const report = relinkFileRefs(xml, ROOT, {
+      fileCreatedAt: () => 3_800_000_000,
+    })
     expect(report.xml).toMatch(/<Data>\n\t[0-9A-F]/)
   })
 
@@ -134,5 +136,55 @@ describe("relinkFileRefs", () => {
     const xml = v10Ref({ relative: ["AUDIO TRACKS"], name: "x.wav" })
     const once = relinkFileRefs(xml, ROOT).xml
     expect(relinkFileRefs(once, ROOT).xml).toBe(once)
+  })
+})
+
+describe("relinkFileRefs with a locate callback", () => {
+  const ref = () =>
+    v10Ref({
+      relative: ["AUDIO TRACKS", "CURRENT SONGS", "NOVO SOM"],
+      name: "NOVO SOM_ DRUMS.wav",
+    })
+
+  it("writes where the file really is when the document is stale", () => {
+    // The real case: the audio moved into the campus folder after the .als was
+    // saved, so the path the document states points nowhere.
+    const real = `${ROOT}/AUDIO TRACKS/CAMPUSES/BRAZIL/Novo Som_D_128/NOVO SOM_ DRUMS.wav`
+    const report = relinkFileRefs(ref(), ROOT, { locate: () => real })
+
+    expect(report.relinked).toBe(1)
+    expect(report.located).toBe(1)
+    expect(report.xml).toContain('Dir="BRAZIL"')
+    expect(report.xml).not.toContain('Dir="CURRENT SONGS"')
+  })
+
+  it("gets the rebuilt path and the file name, so the caller can look it up", () => {
+    const seen: { candidate: string; fileName: string }[] = []
+    relinkFileRefs(ref(), ROOT, {
+      locate: (input) => {
+        seen.push({ ...input })
+        return null
+      },
+    })
+    expect(seen).toEqual([
+      {
+        candidate: `${ROOT}/AUDIO TRACKS/CURRENT SONGS/NOVO SOM/NOVO SOM_ DRUMS.wav`,
+        fileName: "NOVO SOM_ DRUMS.wav",
+      },
+    ])
+  })
+
+  it("null keeps the rebuilt path and counts nothing as located", () => {
+    const report = relinkFileRefs(ref(), ROOT, { locate: () => null })
+    expect(report.relinked).toBe(1)
+    expect(report.located).toBe(0)
+    expect(report.xml).toContain('Dir="NOVO SOM"')
+  })
+
+  it("returning the same path is not counted as a relocation", () => {
+    const report = relinkFileRefs(ref(), ROOT, {
+      locate: ({ candidate }) => candidate,
+    })
+    expect(report.located).toBe(0)
   })
 })

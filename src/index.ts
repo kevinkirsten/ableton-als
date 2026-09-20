@@ -93,6 +93,7 @@ export {
 export {
   relinkFileRefs,
   writeV10FileRef,
+  type RelinkOptions,
   type RelinkReport,
 } from "./core/file-ref.js"
 
