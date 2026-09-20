@@ -91,6 +91,12 @@ export {
 } from "./core/clip-envelopes.js"
 
 export {
+  relinkFileRefs,
+  writeV10FileRef,
+  type RelinkReport,
+} from "./core/file-ref.js"
+
+export {
   convertFileRefs,
   convertFollowActions,
   convertScenes,

@@ -15,7 +15,11 @@
 // middle of a live performance, which is worse.
 // ---------------------------------------------------------------------------
 
-import { buildAliasRecord } from "./alias.js"
+import {
+  AUDIO_FILE,
+  FILE_REF,
+  writeV10FileRef,
+} from "./file-ref.js"
 import { decodeTimeSignatureId, unescapeXml } from "./document.js"
 import {
   applyEdits,
@@ -1141,31 +1145,6 @@ function greatestCommonDivisor(left: number, right: number): number {
 
 // A device preset's FileRef comes WITH an attribute (`<FileRef Id="4">`),
 // which v10 does not know — hence the `[^>]*`.
-const FILE_REF = /<FileRef((?:\s+[\w:-]+="[^"]*")*)\s*>([\s\S]*?)<\/FileRef>/g
-const AUDIO_FILE = /\.(wav|aif|aiff|mp3|flac|ogg|m4a)$/i
-
-/**
- * The `<Data>` of the FileRef: the alias record Live 10 uses to find the
- * file. Empty when it cannot be built (no date, or outside `/Volumes`) — the
- * set then opens with the clips greyed out, but it opens, and the warning
- * warns.
- *
- * The hex goes out in 80-character lines, as Ableton writes it.
- */
-function aliasData(
-  path: string,
-  fileCreatedAt?: (absolutePath: string) => number | null
-): string {
-  if (!fileCreatedAt) return `<Data />`
-  const absolute = path.startsWith("/") ? path : `/${path}`
-  const createdAt = fileCreatedAt(absolute)
-  if (createdAt === null || createdAt === undefined) return `<Data />`
-  const alias = buildAliasRecord({ absolutePath: absolute, createdAt })
-  if (!alias.ok) return `<Data />`
-  const lines = alias.hex.match(/.{1,80}/g) ?? []
-  return `<Data>\n\t${lines.join("\n\t")}\n\t</Data>`
-}
-
 export function convertFileRefs(
   xml: string,
   libraryRoot: string,
@@ -1212,62 +1191,20 @@ export function convertFileRefs(
         : (relative ? `${root}/${absolute}` : absolute)
             .split("/")
             .filter(Boolean)
-    const fileName = segments[segments.length - 1] ?? ""
-
-    // Ids local to the FileRef, as in the real files — a global counter would
-    // inflate the document's highest Id and break the `NextPointeeId`.
-    let elementId = 0
-    const element = (dir: string): string =>
-      `<RelativePathElement Id="${elementId++}" Dir="${escapeXml(dir)}" />`
-
-    // An empty list is written self-closed, as Live 10 writes it.
-    const list = (tag: string, dirs: readonly string[]): string =>
-      dirs.length === 0
-        ? `<${tag} />`
-        : `<${tag}>${dirs.map(element).join("")}</${tag}>`
-
-    const absoluteDirs = segments.slice(0, -1)
-
     // A ref with no size or CRC goes out as v10 writes it: all zeroed and
     // `HasExtendedInfo` false (measured on the 20 empty refs of the golden
     // pair).
-    const fileSize = readValue(body, "OriginalFileSize") ?? "0"
-    const crc = readValue(body, "OriginalCrc") ?? "0"
-    const hasExtendedInfo = fileSize !== "0" || crc !== "0"
-
     edits.push({
       start: offset,
       end: offset + match[0]!.length,
-      replacement: [
-        `<FileRef${attributes}>`,
-        // NO relative path, and this is MEASURED, not chosen: all 392 FileRefs
-        // of the small v10 reference set — written by Live 10 itself and one
-        // that always opened — are `false`/`0`/empty list. What resolves the
-        // file is the absolute `PathHint` right below.
-        //
-        // The porter used to write `RelativePathType=3` and Live 10 opened
-        // with ALL clips greyed out; switching to `1` with the up-level
-        // elements did not fix it (two tests in real Live). The relative path
-        // Live writes after you locate the samples by hand is ANOTHER thing,
-        // and it is no reference for whoever writes the file from scratch.
-        `<HasRelativePath Value="false" />`,
-        `<RelativePathType Value="0" />`,
-        `<RelativePath />`,
-        `<Name Value="${escapeXml(fileName)}" />`,
-        `<Type Value="${readValue(body, "Type") ?? "2"}" />`,
-        aliasData(segments.join("/"), fileCreatedAt),
-        `<RefersToFolder Value="false" />`,
-        `<SearchHint>`,
-        list("PathHint", absoluteDirs),
-        `<FileSize Value="${fileSize}" />`,
-        `<Crc Value="${crc}" />`,
-        `<MaxCrcSize Value="${hasExtendedInfo ? "16384" : "0"}" />`,
-        `<HasExtendedInfo Value="${hasExtendedInfo}" />`,
-        `</SearchHint>`,
-        `<LivePackName Value="" />`,
-        `<LivePackId Value="" />`,
-        `</FileRef>`,
-      ].join(""),
+      replacement: writeV10FileRef({
+        attributes,
+        absolutePath: segments.join("/"),
+        type: readValue(body, "Type") ?? "2",
+        fileSize: readValue(body, "OriginalFileSize") ?? "0",
+        crc: readValue(body, "OriginalCrc") ?? "0",
+        fileCreatedAt,
+      }),
     })
   }
 
