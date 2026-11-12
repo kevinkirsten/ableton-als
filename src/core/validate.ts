@@ -7,6 +7,7 @@
 
 import {
   describeClipSlotLists,
+  findGroupSlotLists,
   findSceneRanges,
   maxElementId,
 } from "./surgery.js"
@@ -55,6 +56,17 @@ export type ValidationProblem =
       {
         readonly list: number
         readonly track: string
+        readonly slots: number
+        readonly scenes: number
+      }
+    >
+  /** A GroupTrack whose own row (`GroupTrackSlot`) count does not match the
+   *  scene count: Live crashes when the file opens. */
+  | Problem<
+      "grid",
+      "grid_group_slot_count",
+      {
+        readonly group: number
         readonly slots: number
         readonly scenes: number
       }
@@ -138,7 +150,23 @@ function checkPointeeReferences(xml: string): readonly ValidationProblem[] {
 /** Every ClipSlotList has exactly one slot per scene — or none. */
 function checkGrid(xml: string): readonly ValidationProblem[] {
   const sceneCount = findSceneRanges(xml).length
-  return describeClipSlotLists(xml).flatMap((list, index) =>
+  const groups = findGroupSlotLists(xml).flatMap((list, index) =>
+    list.slots.length === sceneCount
+      ? []
+      : [
+          {
+            rule: "grid" as const,
+            code: "grid_group_slot_count" as const,
+            values: {
+              group: index,
+              slots: list.slots.length,
+              scenes: sceneCount,
+            },
+            detail: `group ${index} has ${list.slots.length} group slots for ${sceneCount} scenes`,
+          },
+        ]
+  )
+  return [...groups, ...describeClipSlotLists(xml).flatMap((list, index) =>
     list.slots.length === sceneCount || list.slots.length === 0
       ? []
       : [
@@ -154,7 +182,7 @@ function checkGrid(xml: string): readonly ValidationProblem[] {
             detail: `list ${index} ("${list.trackName}") has ${list.slots.length} slots for ${sceneCount} scenes`,
           },
         ]
-  )
+  )]
 }
 
 const TAG = /<(\/?)([A-Za-z_][\w.-]*)((?:"[^"]*"|[^>"])*?)(\/?)>/g

@@ -201,6 +201,50 @@ export function withClipColorIndex(
 }
 
 /** A clipless slot, in the exact shape Live writes. */
+/**
+ * The `<Slots>` of every GroupTrack: the group's own row in the Session view,
+ * one `<GroupTrackSlot>` per scene with Ids 0..n-1. It is a per-scene list
+ * like a ClipSlotList, and a group with fewer slots than scenes crashes Live
+ * when the file opens (measured: 82 group slots for 173 scenes).
+ */
+export function findGroupSlotLists(xml: string): readonly GroupSlotList[] {
+  const lists: GroupSlotList[] = []
+  const listRe = /<Slots>(?=\s*<GroupTrackSlot[\s>])/g
+  let match: RegExpExecArray | null
+  while ((match = listRe.exec(xml)) !== null) {
+    const bodyStart = listRe.lastIndex
+    const bodyEnd = xml.indexOf("</Slots>", bodyStart)
+    if (bodyEnd === -1) continue
+    const body = xml.slice(bodyStart, bodyEnd)
+    const slots = [...body.matchAll(/<GroupTrackSlot Id="\d+">[\s\S]*?<\/GroupTrackSlot>|<GroupTrackSlot Id="\d+" \/>/g)].map((slot) => slot[0])
+    lists.push({ bodyStart, bodyEnd, slots })
+    listRe.lastIndex = bodyEnd
+  }
+  return lists
+}
+
+export type GroupSlotList = {
+  readonly bodyStart: number
+  readonly bodyEnd: number
+  /** Each `<GroupTrackSlot>`, in order. */
+  readonly slots: readonly string[]
+}
+
+const EMPTY_GROUP_SLOT = `<GroupTrackSlot Id="0"><LomId Value="0" /></GroupTrackSlot>`
+
+/** The list rewritten with its slots, renumbered 0..n-1 as Live writes them. */
+function groupSlotsEdit(list: GroupSlotList, slots: readonly string[]): Edit {
+  return {
+    start: list.bodyStart,
+    end: list.bodyEnd,
+    replacement: slots
+      .map((slot, index) =>
+        slot.replace(/^<GroupTrackSlot Id="\d+"/, `<GroupTrackSlot Id="${index}"`)
+      )
+      .join(""),
+  }
+}
+
 export function emptyClipSlot(id: number): string {
   return `<ClipSlot Id="${id}"><LomId Value="0" /><ClipSlot><Value /></ClipSlot><HasStop Value="true" /><NeedRefreeze Value="true" /></ClipSlot>`
 }
@@ -264,6 +308,18 @@ export function insertSceneRows(
     })
   }
 
+  for (const list of findGroupSlotLists(xml)) {
+    if (list.slots.length !== scenes.length) continue
+    const added = rows.map(() => EMPTY_GROUP_SLOT)
+    edits.push(
+      groupSlotsEdit(list, [
+        ...list.slots.slice(0, position),
+        ...added,
+        ...list.slots.slice(position),
+      ])
+    )
+  }
+
   return { ok: true, xml: applyEdits(xml, edits) }
 }
 
@@ -303,6 +359,15 @@ export function removeScenes(
     for (const index of doomed) {
       edits.push({ ...slots[index]!, replacement: "" })
     }
+  }
+  for (const list of findGroupSlotLists(xml)) {
+    if (list.slots.length !== scenes.length) continue
+    edits.push(
+      groupSlotsEdit(
+        list,
+        list.slots.filter((_, index) => !doomed.has(index))
+      )
+    )
   }
 
   return { ok: true, xml: applyEdits(xml, edits), removed: doomed.size }

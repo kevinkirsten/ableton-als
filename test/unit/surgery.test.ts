@@ -5,9 +5,13 @@ import {
   clipColorIndex,
   findClipSlotLists,
   findSceneRanges,
+  emptyClipSlot,
+  findGroupSlotLists,
+  insertSceneRows,
   removeScenes,
   withClipColorIndex,
 } from "../../src/core/surgery.js"
+import { validateGeneratedSet } from "../../src/core/validate.js"
 import { paletteIndexFromFileColor } from "../../src/core/live-palette.js"
 
 /**
@@ -53,6 +57,24 @@ function track(id: number, name: string, sceneCount: number): string {
     </AudioTrack>`
 }
 
+/** A GroupTrack with its own Session row: one GroupTrackSlot per scene. */
+function group(id: number, sceneCount: number): string {
+  const slots = Array.from(
+    { length: sceneCount },
+    (_, index) =>
+      `<GroupTrackSlot Id="${index}"><LomId Value="0" /></GroupTrackSlot>`
+  ).join("")
+  return `
+    <GroupTrack Id="${id}">
+      <Name><EffectiveName Value="BAND" /><UserName Value="BAND" /></Name>
+      <Slots>${slots}</Slots>
+      <DeviceChain>
+        <FreezeSequencer><ClipSlotList /></FreezeSequencer>
+        <MainSequencer><ClipSlotList /></MainSequencer>
+      </DeviceChain>
+    </GroupTrack>`
+}
+
 function document(sceneNames: readonly string[]): string {
   const scenes = sceneNames
     .map((name, index) => `<Scene Id="${index + 1}" Value="${name}" />`)
@@ -63,6 +85,7 @@ function document(sceneNames: readonly string[]): string {
     <Tracks>
       ${track(10, "CLICK", sceneNames.length)}
       ${track(11, "LEAD 1", sceneNames.length)}
+      ${group(12, sceneNames.length)}
     </Tracks>
     <MasterTrack>
       <Tempo><Manual Value="120" /></Tempo>
@@ -170,7 +193,10 @@ describe("removeScenes", () => {
     const after = parseAlsDocument(result.xml)
     expect(after.scenes.map((scene) => scene.rawName)).toEqual(["A", "D"])
     expect(gridIsConsistent(after)).toBe(true)
-    for (const trackAfter of after.tracks) {
+    // The group keeps its row in GroupTrackSlot, not in a ClipSlotList.
+    for (const trackAfter of after.tracks.filter(
+      (item) => item.name !== "BAND"
+    )) {
       expect(trackAfter.sessionClips).toHaveLength(2)
     }
   })
@@ -211,5 +237,54 @@ describe("removeScenes", () => {
     expect(after.tracks.every((item) => item.sessionClips.length === 0)).toBe(
       true
     )
+  })
+})
+
+describe("the group's own row (GroupTrackSlot)", () => {
+  const groupIds = (xml: string) =>
+    findGroupSlotLists(xml).map((list) =>
+      list.slots.map((slot) => /Id="(\d+)"/.exec(slot)![1])
+    )
+
+  it("inserting rows adds one group slot per row, renumbered 0..n-1", () => {
+    const xml = document(["A", "B", "C"])
+    const scene = `<Scene Id="90" Value="NEW" />`
+    const result = insertSceneRows(xml, 1, [
+      { scene, slots: new Map(), id: 90 },
+      { scene: scene.replace("90", "91"), slots: new Map(), id: 91 },
+    ])
+    if (!result.ok) throw new Error(result.error)
+    expect(groupIds(result.xml)).toEqual([["0", "1", "2", "3", "4"]])
+    expect(findSceneRanges(result.xml)).toHaveLength(5)
+  })
+
+  it("removing scenes takes the group slot along and renumbers", () => {
+    const result = removeScenes(document(["A", "B", "C", "D"]), [0, 2])
+    if (!result.ok) throw new Error(result.error)
+    expect(groupIds(result.xml)).toEqual([["0", "1"]])
+  })
+
+  it("validation flags a group with fewer slots than scenes", () => {
+    const xml = document(["A", "B", "C"])
+    // Inserting into a copy whose group lost a slot leaves it short.
+    const broken = xml.replace(
+      `<GroupTrackSlot Id="2"><LomId Value="0" /></GroupTrackSlot>`,
+      ""
+    )
+    const problems = validateGeneratedSet(broken)
+    expect(problems.map((problem) => problem.code)).toContain(
+      "grid_group_slot_count"
+    )
+    expect(
+      validateGeneratedSet(xml).map((problem) => problem.code)
+    ).not.toContain("grid_group_slot_count")
+  })
+
+  it("an empty clip slot is still what fills the track lists", () => {
+    const result = insertSceneRows(document(["A"]), 1, [
+      { scene: `<Scene Id="90" Value="NEW" />`, slots: new Map(), id: 90 },
+    ])
+    if (!result.ok) throw new Error(result.error)
+    expect(result.xml).toContain(emptyClipSlot(90))
   })
 })
