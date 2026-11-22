@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The build puts the Content-Security-Policy here. It forbids every
+         network request from this page: connect-src 'none'. -->
+    <!-- content-security-policy -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ableton-als demo: inspect, repair and convert .als files in your browser</title>
+    <meta
+      name="description"
+      content="Drop a Live Set (.als) to see its tracks, scenes and clips, check it for the damage that crashes Live, repair it, and convert a Live 12 set to Live 10. Runs entirely in your browser: the file never leaves your computer."
+    />
+    <link rel="canonical" href="https://kevinkirsten.github.io/ableton-als/" />
+    <meta name="theme-color" content="#f4f5f6" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <!-- Applies a saved light or dark choice before first paint. A separate
+         file because this page allows no inline script. -->
+    <script src="./theme.js"></script>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-inner">
+        <a class="brand" href="./" translate="no">ableton-als</a>
+        <span class="brand-note">demo</span>
+        <nav class="top-nav" aria-label="Project links">
+          <a href="https://github.com/kevinkirsten/ableton-als">GitHub</a>
+          <a href="https://www.npmjs.com/package/ableton-als">npm</a>
+          <button
+            class="icon-button"
+            id="theme-toggle"
+            type="button"
+            aria-label="Switch between light and dark theme"
+          ></button>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section id="landing" class="landing">
+        <div class="landing-copy">
+          <h1>Inspect, repair and convert Live Sets, right in this tab.</h1>
+          <p class="lead">
+            Drop an <code translate="no">.als</code> file to see its tracks, scenes and
+            clips, check it for the damage that makes Live refuse or crash, fix
+            it, and turn a Live 12 set into one Live 10 can open.
+          </p>
+
+          <div id="drop-zone" class="drop-zone">
+            <input id="file-input" class="visually-hidden" type="file" accept=".als,.xml" />
+            <p class="drop-title">Drop an <span translate="no">.als</span> file anywhere on this page</p>
+            <div class="drop-actions">
+              <label class="button button-primary" for="file-input" id="choose-label">Choose a file</label>
+              <button class="button" type="button" id="open-sample">Open the sample set</button>
+              <button class="button" type="button" id="open-damaged">Open a damaged one</button>
+            </div>
+            <p id="open-status" class="drop-status" role="status"></p>
+          </div>
+
+          <p class="privacy">
+            <strong>Your file never leaves this computer.</strong> This page has no
+            server, and its security policy forbids every network request, so it
+            could not upload a set if it tried.
+            <a href="#verify">How to check that yourself.</a>
+          </p>
+        </div>
+
+        <figure class="landing-preview" id="landing-preview" aria-label="The sample set as this page reads it">
+          <div class="preview-grid" id="preview-grid"></div>
+          <figcaption id="preview-caption">
+            The sample set: synthetic, written for this page, never saved by Live.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="workspace" class="workspace" hidden></section>
+
+      <section id="about" class="about">
+        <div class="about-block">
+          <h2>What this page does</h2>
+          <div class="table-scroll">
+            <table class="table">
+              <tbody>
+                <tr>
+                  <th scope="row">Inspect</th>
+                  <td>
+                    The Live version that saved the set, its tempo, tracks, scenes
+                    and clips with the colours stored in the file, and every audio
+                    file it references.
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Validate</th>
+                  <td>
+                    The structural rules Live depends on: one clip slot per scene
+                    in every track, automation that points at a real target, routes
+                    that lead to a real track. Each problem comes with a stable
+                    code and its values.
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Convert</th>
+                  <td>
+                    Live 12 to Live 10. Live has no downgrade path, so the page
+                    rebuilds the file the older version expects, including the
+                    alias records Live 10 finds audio by.
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Repair</th>
+                  <td>
+                    Duplicate automation Ids, clips warped at the wrong tempo,
+                    follow actions out of step, clip geometry that differs between
+                    tracks, and samples that point at another machine.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted">
+            Every action shows the code that does the same thing with the
+            <a href="https://github.com/kevinkirsten/ableton-als">ableton-als</a>
+            library, for the browser and for Node.
+          </p>
+        </div>
+
+        <div class="about-block" id="verify">
+          <h2>Check the privacy claim</h2>
+          <ol class="steps-list">
+            <li>
+              Open your browser's developer tools on the Network tab, then open a
+              set and convert it. No request appears.
+            </li>
+            <li>
+              Load this page, turn Wi-Fi off, and use it. Everything still works.
+            </li>
+            <li>
+              View the page source. The
+              <code translate="no">Content-Security-Policy</code> tag at the top
+              carries <code translate="no">connect-src 'none'</code>, which makes
+              the browser itself refuse any upload.
+            </li>
+          </ol>
+        </div>
+
+        <div class="about-block">
+          <h2>What was measured, and what was not</h2>
+          <ul class="plain-list">
+            <li>
+              Conversion was measured against sets written by Live 10.1.43 and
+              Live 12.4.3 on macOS. A converted 561-scene set opened in Live 10
+              with no missing files.
+            </li>
+            <li>
+              Alias records are built only for audio under
+              <code translate="no">/Volumes/</code>. A set whose audio sits on the
+              startup disk still converts, and Live 10 asks you to locate the
+              audio once.
+            </li>
+            <li>
+              Live 11 sets are not converted. That version has never been measured
+              against a real file, and a guess here produces a set that opens and
+              then crashes.
+            </li>
+            <li>
+              No Windows-authored set has been checked. If you have one that
+              misbehaves, an
+              <a href="https://github.com/kevinkirsten/ableton-als/issues">issue with the file attached</a>
+              is the most useful report there is.
+            </li>
+            <li>Always keep your original file. This page never overwrites it.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-inner">
+        <p>
+          <span translate="no">ableton-als</span> <span id="lib-version"></span> is
+          MIT licensed and open source.
+          <span translate="no">Ableton®</span> and <span translate="no">Live™</span>
+          are trademarks of Ableton AG. This project is unofficial, unaffiliated
+          with and unendorsed by Ableton AG.
+        </p>
+        <p class="muted">
+          No analytics, no cookies, no third-party requests. Set in IBM Plex, used
+          under the SIL Open Font License.
+        </p>
+      </div>
+    </footer>
+
+    <div id="drop-veil" class="drop-veil" hidden>
+      <p>Drop the file to open it</p>
+    </div>
+    <div id="announcer" class="visually-hidden" aria-live="polite"></div>
+  </body>
+</html>

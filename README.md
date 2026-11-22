@@ -10,21 +10,23 @@
 
 Its headline feature: **convert a Live 12 set into a file Live 10 can open.** Ableton offers no downgrade path — a set saved in a newer Live simply refuses to open in an older one. This library builds the file the older Live expects.
 
-> ## Status: early development
+**[Try it in your browser](https://kevinkirsten.github.io/ableton-als/)**: drop a set to inspect it, validate it, repair it and convert it from Live 12 to Live 10. Nothing to install, and the file never leaves your machine.
+
+> ## Status: 0.x, in production use
 >
-> **The API will change without warning until `0.1.0`.** This code was extracted
-> from a private application where it has been running in production against a
-> real archive, and it is still settling into a library shape.
+> **The API can still change between minor versions until `1.0`.** This code was
+> extracted from a private application, where it runs in production against a
+> real archive.
 >
 > | | |
 > |---|---|
-> | Working today | `.als` parsing, surgical editing, validation, the Live 12 → 10 porter, alias record generation, repair tools, Node and web adapters |
-> | Next | `docs/FORMAT.md`, a browser demo, `0.1.0` |
+> | Working today | `.als` parsing, surgical editing, validation, the Live 12 → 10 porter, alias record generation, sample relinking, repair tools, Node and web adapters, and a [browser demo](https://kevinkirsten.github.io/ableton-als/) |
+> | Next | `docs/FORMAT.md` |
 >
-> What is here is verified rather than asserted: 168 unit tests, and the
-> conversion is checked against sets Ableton itself wrote — most recently 5,016
-> alias records reproduced byte for byte, and a converted 561-scene set opened in
-> real Live 10 with zero missing files.
+> What is here is verified rather than asserted: 194 unit tests on the library,
+> and the conversion is checked against sets Ableton itself wrote. Most recently
+> 5,016 alias records were reproduced byte for byte, and a converted 561-scene
+> set opened in real Live 10 with zero missing files.
 
 ## This is not a "control Live" library
 
@@ -35,6 +37,82 @@ If you want to talk to a **running** copy of Ableton Live — launch clips, chan
 [ableton-js]: https://github.com/leolabs/ableton-js
 [abletonosc]: https://github.com/ideoforms/AbletonOSC
 
+## Quickstart
+
+```bash
+npm install ableton-als
+```
+
+Convert a Live 12 set to Live 10 in Node:
+
+```ts
+import { readFile, writeFile } from "node:fs/promises"
+import { convertAlsToV10 } from "ableton-als/node"
+
+const result = convertAlsToV10({
+  fileName: "Song.als",
+  bytes: await readFile("Song.als"),
+  libraryRoot: "/Volumes/Demo SSD/Library",
+})
+if (!result.ok) throw new Error(result.error)
+
+const { fileName, bytes } = result.data
+const { warnings, problems } = result.data
+for (const warning of warnings) {
+  console.warn(warning.code, warning.values)
+}
+
+// Never keep a set Live 10 would crash on.
+if (problems.length > 0) {
+  throw new Error(problems[0]!.detail)
+}
+
+// "Song [v10].als", never over the original.
+await writeFile(fileName, bytes)
+```
+
+The same conversion in a browser, where the file never leaves the page:
+
+```ts
+import {
+  decodeAls,
+  downgradeToV10,
+  encodeAls,
+  fileCreatedAt,
+  validateGeneratedSet,
+} from "ableton-als/web"
+
+export async function convert(
+  file: File
+): Promise<Uint8Array> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const xml = await decodeAls(bytes)
+
+  const result = downgradeToV10(xml, {
+    libraryRoot: "/Volumes/Demo SSD/Library",
+    // Builds the alias records Live 10 finds audio by.
+    fileCreatedAt,
+  })
+  if (!result.ok) throw new Error(result.error)
+
+  for (const warning of result.warnings) {
+    console.warn(warning.code, warning.values)
+  }
+
+  // Never hand over a set Live 10 would crash on.
+  const problems = validateGeneratedSet(result.xml)
+  if (problems.length > 0) {
+    throw new Error(problems[0]!.detail)
+  }
+
+  // Save as "Song [v10].als" and keep the original.
+  return encodeAls(result.xml)
+}
+```
+
+Both snippets are compiled in CI against the library source, together with the
+rest of the [examples the demo shows](./site/src/snippets).
+
 ## Why it runs in the browser
 
 The core has **zero dependencies** and never imports a Node builtin. Everything that touches the world — gzip, the filesystem — lives in adapters. So the same conversion logic runs in Node, Deno, Bun, Workers and the browser.
@@ -42,6 +120,17 @@ The core has **zero dependencies** and never imports a Node builtin. Everything 
 That is not a technical curiosity. Every other tool that downgrades a Live set is either a Python CLI or a web service you have to **upload your project to**. This one can do it in a tab, with the file never leaving your machine.
 
 And it is genuinely lossless there: the only filesystem fact the conversion appears to need is a file creation date, and Live turns out to ignore it — measured by writing a file with a deliberately wrong constant date and watching it open with every clip loaded.
+
+### The demo
+
+[kevinkirsten.github.io/ableton-als](https://kevinkirsten.github.io/ableton-als/) is that claim made checkable. It is a static page whose Content Security Policy carries `connect-src 'none'`, so the browser itself refuses any upload, and it does all its work in a Web Worker: inspect a set, validate it, convert it and run the repair tools, each one next to the code that does the same thing.
+
+Its source is in [`site/`](./site). It is written without a framework, on purpose, so it doubles as the reference example.
+
+```bash
+pnpm demo:dev      # http://localhost:3140
+pnpm demo:build    # static files in site/dist
+```
 
 ## What makes writing `.als` hard
 

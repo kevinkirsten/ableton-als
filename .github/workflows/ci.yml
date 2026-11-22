@@ -30,9 +30,15 @@ jobs:
             exit 1
           fi
 
+      # `typecheck` covers the demo too, including every code snippet the
+      # page shows: they are real files compiled against the library source.
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+      # The demo is the reference example. An API change that breaks it
+      # breaks the build, here, before it reaches the published page.
+      - run: pnpm demo:build
 
       # Catches an `exports` map or a `files` list that stopped matching what
       # was actually built. Cheap, and only ever fails for a real reason.

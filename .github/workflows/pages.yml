@@ -1,0 +1,66 @@
+name: Pages
+
+# Builds the browser demo from the source tree and publishes it to GitHub
+# Pages. The demo imports `src/web.ts` directly, never the npm package, so the
+# page and the library cannot drift apart: they are built from one commit.
+#
+# Requires Pages to be enabled for the repository with "GitHub Actions" as the
+# source (Settings > Pages).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write # deploy-pages verifies where the artifact came from
+
+# One deployment at a time, and never cancel one that is already going out.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Never publish a page that does not pass its own gates.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm demo:build
+
+      # The page promises it cannot upload a file. Fail the deployment if the
+      # built page ever loses the policy that makes that true.
+      - name: The built page forbids network requests
+        run: |
+          if ! grep -q "connect-src 'none'" site/dist/index.html; then
+            echo "::error::site/dist/index.html has no connect-src 'none' policy"
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

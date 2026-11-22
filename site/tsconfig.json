@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node"],
+    "paths": {
+      "ableton-als": ["../src/index.ts"],
+      "ableton-als/web": ["../src/web.ts"],
+      "ableton-als/node": ["../src/node.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "demo:dev"
+      ],
+      "port": 3140
+    },
+    {
+      "name": "demo-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "demo:preview"
+      ],
+      "port": 3141
+    }
+  ]
+}
