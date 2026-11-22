@@ -27,6 +27,19 @@ async function collect(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> 
   return out
 }
 
+/**
+ * The gzip transforms as a plain pair of byte streams.
+ *
+ * Type-level only. The DOM typings and the Node typings disagree about what a
+ * `CompressionStream` accepts (`BufferSource` against `Uint8Array`), so piping
+ * a `Uint8Array` stream through one compiles under one library and fails under
+ * the other. Naming the shape here keeps this file valid under both.
+ */
+type ByteTransform = {
+  readonly readable: ReadableStream<Uint8Array>
+  readonly writable: WritableStream<Uint8Array>
+}
+
 function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -38,7 +51,9 @@ function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
 
 /** An `.als` file is gzipped XML. Decompress it into the string the core wants. */
 export async function decodeAls(bytes: Uint8Array): Promise<string> {
-  const stream = streamOf(bytes).pipeThrough(new DecompressionStream("gzip"))
+  const stream = streamOf(bytes).pipeThrough(
+    new DecompressionStream("gzip") as unknown as ByteTransform
+  )
   return new TextDecoder().decode(await collect(stream))
 }
 
@@ -50,7 +65,9 @@ export async function decodeAls(bytes: Uint8Array): Promise<string> {
  */
 export async function encodeAls(xml: string): Promise<Uint8Array> {
   const encoded = new TextEncoder().encode(xml)
-  const stream = streamOf(encoded).pipeThrough(new CompressionStream("gzip"))
+  const stream = streamOf(encoded).pipeThrough(
+    new CompressionStream("gzip") as unknown as ByteTransform
+  )
   const bytes = await collect(stream)
   if ((await decodeAls(bytes)) !== xml) {
     throw new Error("gzip round-trip failed; refusing to return corrupt bytes")
