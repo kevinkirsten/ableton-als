@@ -4,14 +4,29 @@
 // freeze the page.
 
 import { decodeAls, encodeAls } from "../../src/web.js"
-import { checkDocument, inspect, looksGzipped, Session } from "./engine.js"
+import {
+  checkDocument,
+  inspect,
+  looksGzipped,
+  outputRefusal,
+  Session,
+  type Phase,
+} from "./engine.js"
 import type { Reply, Request } from "./protocol.js"
+import { sampleBytes } from "./sample-bytes.js"
 import {
   buildDamagedSampleSet,
-  buildSampleSet,
   DAMAGED_FILE_NAME,
   SAMPLE_FILE_NAME,
-} from "./sample.js"
+} from "./sample-set.js"
+
+/** The sample as Live 12 saved it, decompressed once. */
+let sampleXml: string | null = null
+
+async function loadSample(): Promise<string> {
+  sampleXml ??= await decodeAls(sampleBytes())
+  return sampleXml
+}
 
 type WorkerScope = {
   postMessage(message: Reply, transfer?: Transferable[]): void
@@ -29,7 +44,8 @@ function send(reply: Reply, transfer?: Transferable[]): void {
   scope.postMessage(reply, transfer)
 }
 
-const phase = (label: string): void => send({ type: "phase", label })
+// The worker speaks in codes only. Every sentence is the page's to word.
+const phase = (phase: Phase): void => send({ type: "phase", phase })
 
 function publish(): void {
   if (session === null) return
@@ -42,7 +58,7 @@ async function open(name: string, buffer: ArrayBuffer): Promise<void> {
 
   let xml: string
   if (looksGzipped(bytes)) {
-    phase("Decompressing…")
+    phase("decompressing")
     try {
       xml = await decodeAls(bytes)
     } catch {
@@ -67,20 +83,21 @@ async function handle(request: Request): Promise<void> {
     case "open":
       return open(request.name, request.bytes)
     case "sample": {
-      phase("Building the sample set…")
+      phase("building_sample")
       const damaged = request.which === "damaged"
-      const xml = damaged ? buildDamagedSampleSet() : buildSampleSet()
-      const size = (await encodeAls(xml)).length
-      session = new Session(
-        damaged ? DAMAGED_FILE_NAME : SAMPLE_FILE_NAME,
-        xml,
-        size,
-        true
-      )
+      const healthy = await loadSample()
+      session = damaged
+        ? new Session(
+            DAMAGED_FILE_NAME,
+            buildDamagedSampleSet(healthy),
+            sampleBytes().length,
+            "damaged"
+          )
+        : new Session(SAMPLE_FILE_NAME, healthy, sampleBytes().length, "sample")
       return publish()
     }
     case "preview": {
-      const xml = buildSampleSet()
+      const xml = await loadSample()
       return send({
         type: "preview",
         inspection: inspect(xml, { fileName: SAMPLE_FILE_NAME, sizeBytes: 0 }),
@@ -95,15 +112,15 @@ async function handle(request: Request): Promise<void> {
 
   switch (request.type) {
     case "convert": {
-      phase("Converting to the Live 10 format…")
+      phase("converting")
       const result = session.convert(request.libraryRoot)
-      if (!result.ok) send({ type: "refused", message: result.error })
+      if (!result.ok) send({ type: "refused", refusal: result.refusal })
       return publish()
     }
     case "tool": {
-      phase("Applying the repair…")
+      phase("repairing")
       const result = session.applyTool(request.operation)
-      if (!result.ok) send({ type: "refused", message: result.error })
+      if (!result.ok) send({ type: "refused", refusal: result.refusal })
       return publish()
     }
     case "previewMirror":
@@ -120,9 +137,12 @@ async function handle(request: Request): Promise<void> {
     case "download": {
       const state = session.state()
       if (state.output.blocked !== null) {
-        return send({ type: "refused", message: state.output.blocked.message })
+        return send({
+          type: "refused",
+          refusal: outputRefusal(state.output.blocked),
+        })
       }
-      phase("Compressing…")
+      phase("compressing")
       // `encodeAls` round-trips before returning: a corrupt gzip yields a file
       // Live opens and then dies on.
       const bytes = await encodeAls(session.xml)

@@ -19,6 +19,7 @@ import rewarpBrowser from "../snippets/rewarp.browser.ts?raw"
 import rewarpNode from "../snippets/rewarp.node.ts?raw"
 import validateBrowser from "../snippets/validate.browser.ts?raw"
 import validateNode from "../snippets/validate.node.ts?raw"
+import { catalog } from "../i18n/index.js"
 import { h, icon } from "./dom.js"
 
 export type SnippetId = "inspect" | "validate" | "convert" | ToolId
@@ -121,18 +122,20 @@ export function copyButton(
   text: () => string,
   announce: (message: string) => void
 ): HTMLButtonElement {
-  const label = h("span", null, "Copy")
+  const label = h("span", null, catalog().code.copy)
   const button = h("button", { class: "button", type: "button" }, icon("copy"), label)
   let timer: number | undefined
   button.addEventListener("click", () => {
     const done = (ok: boolean): void => {
+      // Read when the click lands, so the words follow a language change.
+      const words = catalog()
       button.replaceChildren(icon(ok ? "check" : "copy"), label)
-      label.textContent = ok ? "Copied" : "Select and copy"
-      announce(ok ? "Code copied" : "Copy was blocked. Select the code and copy it.")
+      label.textContent = ok ? words.code.copied : words.code.selectAndCopy
+      announce(ok ? words.announce.codeCopied : words.announce.copyBlocked)
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         button.replaceChildren(icon("copy"), label)
-        label.textContent = "Copy"
+        label.textContent = catalog().code.copy
       }, 2000)
     }
     navigator.clipboard.writeText(text()).then(

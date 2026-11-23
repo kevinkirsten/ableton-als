@@ -30,3 +30,6 @@ CLAUDE.md
 # test/fixtures.
 *.als
 !test/fixtures/**/*.als
+# The demo's sample: authored for this project in Live 12, synthesized audio
+# only (and the audio itself is not committed). See site/sample/README.md.
+!site/sample/Demo Set.als

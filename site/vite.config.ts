@@ -61,6 +61,9 @@ export default defineConfig({
   server: { port: 3140, strictPort: true, host: "127.0.0.1" },
   preview: { port: 3141, strictPort: true, host: "127.0.0.1" },
   worker: { format: "es" },
+  // The sample set is bundled as bytes (`?inline`), because the page may not
+  // fetch anything. Vite only does that for file types it knows are assets.
+  assetsInclude: ["**/*.als"],
   build: {
     target: "es2022",
     outDir: "dist",

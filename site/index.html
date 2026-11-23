@@ -24,10 +24,16 @@
     <header class="top">
       <div class="top-inner">
         <a class="brand" href="./" translate="no">ableton-als</a>
-        <span class="brand-note">demo</span>
-        <nav class="top-nav" aria-label="Project links">
+        <span class="brand-note" id="brand-note">demo</span>
+        <nav class="top-nav" id="top-nav" aria-label="Project links">
           <a href="https://github.com/kevinkirsten/ableton-als">GitHub</a>
           <a href="https://www.npmjs.com/package/ableton-als">npm</a>
+          <label class="visually-hidden" for="locale-select" id="locale-label">Language</label>
+          <select class="select select-compact" id="locale-select" translate="no">
+            <option value="en" lang="en">English</option>
+            <option value="pt-BR" lang="pt-BR">Português</option>
+            <option value="es" lang="es">Español</option>
+          </select>
           <button
             class="icon-button"
             id="theme-toggle"
@@ -41,8 +47,8 @@
     <main>
       <section id="landing" class="landing">
         <div class="landing-copy">
-          <h1>Inspect, repair and convert Live Sets, right in this tab.</h1>
-          <p class="lead">
+          <h1 id="landing-title">Inspect, repair and convert Live Sets, right in this tab.</h1>
+          <p class="lead" id="landing-lead">
             Drop an <code translate="no">.als</code> file to see its tracks, scenes and
             clips, check it for the damage that makes Live refuse or crash, fix
             it, and turn a Live 12 set into one Live 10 can open.
@@ -50,7 +56,7 @@
 
           <div id="drop-zone" class="drop-zone">
             <input id="file-input" class="visually-hidden" type="file" accept=".als,.xml" />
-            <p class="drop-title">Drop an <span translate="no">.als</span> file anywhere on this page</p>
+            <p class="drop-title" id="drop-title">Drop an <span translate="no">.als</span> file anywhere on this page</p>
             <div class="drop-actions">
               <label class="button button-primary" for="file-input" id="choose-label">Choose a file</label>
               <button class="button" type="button" id="open-sample">Open the sample set</button>
@@ -59,7 +65,7 @@
             <p id="open-status" class="drop-status" role="status"></p>
           </div>
 
-          <p class="privacy">
+          <p class="privacy" id="privacy">
             <strong>Your file never leaves this computer.</strong> This page has no
             server, and its security policy forbids every network request, so it
             could not upload a set if it tried.
@@ -70,7 +76,7 @@
         <figure class="landing-preview" id="landing-preview" aria-label="The sample set as this page reads it">
           <div class="preview-grid" id="preview-grid"></div>
           <figcaption id="preview-caption">
-            The sample set: synthetic, written for this page, never saved by Live.
+            The sample set: saved by Live 12 for this page. Its audio is synthesized tones and is not included.
           </figcaption>
         </figure>
       </section>
@@ -178,22 +184,21 @@
 
     <footer class="foot">
       <div class="foot-inner">
-        <p>
+        <p id="foot-license">
           <span translate="no">ableton-als</span> <span id="lib-version"></span> is
           MIT licensed and open source.
           <span translate="no">Ableton®</span> and <span translate="no">Live™</span>
           are trademarks of Ableton AG. This project is unofficial, unaffiliated
           with and unendorsed by Ableton AG.
         </p>
-        <p class="muted">
-          No analytics, no cookies, no third-party requests. Set in IBM Plex, used
-          under the SIL Open Font License.
+        <p class="muted" id="foot-privacy">
+          No analytics, no cookies, no third-party requests.
         </p>
       </div>
     </footer>
 
     <div id="drop-veil" class="drop-veil" hidden>
-      <p>Drop the file to open it</p>
+      <p id="drop-veil-text">Drop the file to open it</p>
     </div>
     <div id="announcer" class="visually-hidden" aria-live="polite"></div>
   </body>

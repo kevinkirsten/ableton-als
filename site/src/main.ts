@@ -1,16 +1,38 @@
 // The page. It never holds the opened set: the Web Worker does, and sends back
 // only what there is to draw.
+//
+// Every word on it comes from the active catalog in `i18n/`. `index.html`
+// carries the English text for the first paint and for a browser without
+// JavaScript; from then on `paintStatic` and `render` draw the page from the
+// catalog, on load and again whenever the language changes.
 
-import type { Inspection, SessionState } from "./engine.js"
+import type {
+  Inspection,
+  OpenError,
+  Phase,
+  Refusal,
+  SessionState,
+} from "./engine.js"
+import {
+  catalog,
+  detectLocale,
+  isLocale,
+  locale,
+  LOCALE_STORAGE_KEY,
+  LOCALES,
+  setLocale,
+} from "./i18n/index.js"
 import type { Reply, Request } from "./protocol.js"
-
-// The two track names the sample plants a geometry difference between. Kept
-// as literals so the page does not bundle the sample generator a second time;
-// a test asserts they match what `sample.ts` exports.
-const SAMPLE_MIRROR_BASE = "DRUMS"
-const SAMPLE_MIRROR_TARGET = "GUITAR"
 import { codeBlock, copyButton, snippet, type Runtime } from "./ui/code.js"
-import { badge, count, formatBytes, h, icon, withColor } from "./ui/dom.js"
+import {
+  badge,
+  formatBytes,
+  formatNumber,
+  h,
+  icon,
+  rich,
+  withColor,
+} from "./ui/dom.js"
 import {
   renderConvert,
   renderInspect,
@@ -22,9 +44,18 @@ import {
   type Tab,
   type Ui,
 } from "./ui/views.js"
+import { outputText, refusalText } from "./ui/wording.js"
+
+// The two track names the sample plants a geometry difference between. Kept
+// as literals so the page does not bundle the sample generator a second time;
+// a test asserts they match what `sample.ts` exports.
+const SAMPLE_MIRROR_BASE = "DRUMS"
+const SAMPLE_MIRROR_TARGET = "GUITAR"
 
 declare const __LIB_VERSION__: string
 declare const __COMMIT__: string
+
+const VERSION = `v${__LIB_VERSION__} (${__COMMIT__})`
 
 const $ = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T
@@ -46,6 +77,43 @@ function announce(message: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Language
+// ---------------------------------------------------------------------------
+
+function savedLocale(): string | null {
+  try {
+    return localStorage.getItem(LOCALE_STORAGE_KEY)
+  } catch {
+    // Storage can be blocked. The browser's languages then decide.
+    return null
+  }
+}
+
+// Before anything is drawn: every painter below reads the active catalog.
+setLocale(detectLocale(navigator.languages, savedLocale()))
+
+const localeSelect = $<HTMLSelectElement>("locale-select")
+localeSelect.replaceChildren(
+  ...LOCALES.map((entry) =>
+    // `lang` so a screen reader says each name in its own language.
+    h("option", { value: entry.id, lang: entry.id }, entry.name)
+  )
+)
+localeSelect.value = locale()
+localeSelect.addEventListener("change", () => {
+  const next = localeSelect.value
+  if (!isLocale(next) || next === locale()) return
+  setLocale(next)
+  try {
+    localStorage.setItem(LOCALE_STORAGE_KEY, next)
+  } catch {
+    // Storage can be blocked; the choice then lasts for this visit.
+  }
+  paintStatic()
+  render()
+})
+
+// ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
 
@@ -60,10 +128,11 @@ function currentTheme(): "light" | "dark" {
 
 function paintTheme(): void {
   const theme = currentTheme()
+  const words = catalog().header
   themeToggle.replaceChildren(icon(theme === "dark" ? "sun" : "moon"))
   themeToggle.setAttribute(
     "aria-label",
-    theme === "dark" ? "Switch to the light theme" : "Switch to the dark theme"
+    theme === "dark" ? words.toLight : words.toDark
   )
   document
     .querySelector('meta[name="theme-color"]')
@@ -81,17 +150,38 @@ themeToggle.addEventListener("click", () => {
   paintTheme()
 })
 darkQuery.addEventListener("change", paintTheme)
-paintTheme()
-
-$("lib-version").textContent = `v${__LIB_VERSION__} (${__COMMIT__})`
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
+/**
+ * Something the page has to tell the visitor about, kept as a code so it can
+ * be said again in another language.
+ */
+type Notice =
+  | { readonly kind: "open"; readonly code: OpenError | "crashed" }
+  | { readonly kind: "refusal"; readonly refusal: Refusal }
+
+/** What the line under the landing's buttons shows. */
+type OpenStatus =
+  | { readonly kind: "idle" }
+  | { readonly kind: "busy" }
+  | {
+      readonly kind: "error"
+      readonly code: OpenError | "crashed" | "unsupported"
+    }
+
 let state: SessionState | null = null
-let notice: string | null = null
+let notice: Notice | null = null
 let opening = false
+let openState: OpenStatus = { kind: "idle" }
+/** What the landing preview counted in the sample, once it has been read. */
+let previewCounts: {
+  readonly tracks: number
+  readonly scenes: number
+  readonly clips: number
+} | null = null
 
 const ui: Ui = {
   tab: "inspect",
@@ -125,24 +215,137 @@ function resetUi(): void {
   ui.showAllFiles = false
 }
 
+function noticeText(current: Notice): string {
+  return current.kind === "open"
+    ? catalog().errors.open[current.code]
+    : refusalText(current.refusal)
+}
+
+// ---------------------------------------------------------------------------
+// The static parts of the page: header, landing, about and footer
+// ---------------------------------------------------------------------------
+
+function aboutBlocks(): readonly HTMLElement[] {
+  const t = catalog()
+  const { does, verify, measured } = t.about
+  const row = (name: string, text: string): HTMLElement =>
+    h("tr", null, h("th", { scope: "row" }, name), h("td", null, text))
+  return [
+    h(
+      "div",
+      { class: "about-block" },
+      h("h2", null, does.title),
+      h(
+        "div",
+        { class: "table-scroll" },
+        h(
+          "table",
+          { class: "table" },
+          h(
+            "tbody",
+            null,
+            row(t.tabs.inspect, does.inspect),
+            row(t.tabs.validate, does.validate),
+            row(t.tabs.convert, does.convert),
+            row(t.tabs.repair, does.repair)
+          )
+        )
+      ),
+      h("p", { class: "muted" }, rich(does.code))
+    ),
+    h(
+      "div",
+      { class: "about-block", id: "verify" },
+      h("h2", null, verify.title),
+      h(
+        "ol",
+        { class: "steps-list" },
+        h("li", null, verify.network),
+        h("li", null, verify.offline),
+        h("li", null, rich(verify.source))
+      )
+    ),
+    h(
+      "div",
+      { class: "about-block" },
+      h("h2", null, measured.title),
+      h(
+        "ul",
+        { class: "plain-list" },
+        h("li", null, measured.versions),
+        h("li", null, rich(measured.aliases)),
+        h("li", null, measured.live11),
+        h("li", null, rich(measured.windows)),
+        h("li", null, measured.original)
+      )
+    ),
+  ]
+}
+
+function paintPreviewCaption(): void {
+  const words = catalog().landing
+  $("preview-caption").textContent =
+    previewCounts === null
+      ? words.previewCaption
+      : words.previewCaptionCounted(
+          previewCounts.tracks,
+          previewCounts.scenes,
+          previewCounts.clips
+        )
+}
+
+function paintOpenStatus(): void {
+  const t = catalog()
+  if (openState.kind === "error") {
+    openStatus.setAttribute("data-kind", "error")
+    openStatus.textContent =
+      openState.code === "unsupported"
+        ? t.errors.unsupportedBrowser
+        : t.errors.open[openState.code]
+    return
+  }
+  openStatus.removeAttribute("data-kind")
+  openStatus.textContent = openState.kind === "busy" ? busyText() : ""
+}
+
+/**
+ * Everything that is not the workspace, from the catalog. In English it
+ * draws exactly what `index.html` already shows, so nothing moves on load.
+ */
+function paintStatic(): void {
+  const t = catalog()
+  document.documentElement.lang = locale()
+  document.title = t.meta.title
+  document
+    .querySelector('meta[name="description"]')
+    ?.setAttribute("content", t.meta.description)
+
+  $("brand-note").textContent = t.header.demo
+  $("top-nav").setAttribute("aria-label", t.header.projectLinks)
+  $("locale-label").textContent = t.header.language
+  paintTheme()
+
+  $("landing-title").textContent = t.landing.title
+  $("landing-lead").replaceChildren(...rich(t.landing.lead))
+  $("drop-title").replaceChildren(...rich(t.landing.dropTitle))
+  $("choose-label").textContent = t.landing.chooseFile
+  $("open-sample").textContent = t.landing.openSample
+  $("open-damaged").textContent = t.landing.openDamaged
+  $("privacy").replaceChildren(...rich(t.landing.privacy))
+  $("landing-preview").setAttribute("aria-label", t.landing.previewLabel)
+  paintPreviewCaption()
+  paintOpenStatus()
+
+  about.replaceChildren(...aboutBlocks())
+
+  $("foot-license").replaceChildren(...rich(t.footer.license(VERSION)))
+  $("foot-privacy").textContent = t.footer.privacy
+  $("drop-veil-text").textContent = t.landing.dropVeil
+}
+
 // ---------------------------------------------------------------------------
 // The worker
 // ---------------------------------------------------------------------------
-
-const OPEN_ERRORS: Readonly<Record<string, string>> = {
-  empty_file:
-    "That file is empty. Pick the .als file inside your project folder.",
-  not_gzip:
-    "That does not look like a Live Set. An .als file is gzip-compressed XML. Check that you picked the .als itself and not a project folder, an .alp pack or an audio file.",
-  corrupt_gzip:
-    "The file starts like a Live Set but could not be decompressed, so it is probably truncated. Copy it again from the original disk and retry.",
-  not_a_live_set:
-    "The file opened, but there is no Live document inside. It may come from another program.",
-  too_large:
-    "This set is larger than a browser tab handles well. Use the library from Node instead: npm install ableton-als.",
-  crashed:
-    "Something went wrong while working on the file, most likely the tab ran out of memory. Reload the page and try again, or use the library from Node for a set this size.",
-}
 
 const supported =
   typeof Worker === "function" &&
@@ -151,7 +354,12 @@ const supported =
 
 let worker: Worker | null = null
 let busyTimer: number | undefined
-let busyLabel = ""
+/** What the worker is doing, as the code it reported. `null` when idle. */
+let busyPhase: Phase | null = null
+
+function busyText(): string {
+  return busyPhase === null ? "" : catalog().phases[busyPhase]
+}
 
 function startWorker(): Worker {
   const next = new Worker(new URL("./worker.ts", import.meta.url), {
@@ -169,37 +377,37 @@ function send(request: Request, transfer: Transferable[] = []): void {
   worker.postMessage(request, transfer)
 }
 
-function setBusy(label: string | null): void {
-  ui.busy = label !== null
-  busyLabel = label ?? ""
+function setBusy(phase: Phase | null): void {
+  ui.busy = phase !== null
+  busyPhase = phase
   window.clearTimeout(busyTimer)
   const show = (): void => {
     const target = document.getElementById("busy")
     if (target) {
-      target.textContent = busyLabel
-      target.hidden = busyLabel === ""
+      target.textContent = busyText()
+      target.hidden = busyPhase === null
     }
     if (opening) {
-      openStatus.removeAttribute("data-kind")
-      openStatus.textContent = busyLabel
+      openState = { kind: busyPhase === null ? "idle" : "busy" }
+      paintOpenStatus()
     }
   }
   // Fast work never flashes a spinner; slow work shows one after a beat.
-  if (label === null) show()
+  if (phase === null) show()
   else busyTimer = window.setTimeout(show, 150)
 }
 
 function receive(reply: Reply): void {
   switch (reply.type) {
     case "phase":
-      busyLabel = reply.label
+      busyPhase = reply.phase
       if (opening) {
-        openStatus.removeAttribute("data-kind")
-        openStatus.textContent = reply.label
+        openState = { kind: "busy" }
+        paintOpenStatus()
       }
       {
         const target = document.getElementById("busy")
-        if (target && !target.hidden) target.textContent = reply.label
+        if (target && !target.hidden) target.textContent = busyText()
       }
       return
     case "preview":
@@ -211,13 +419,14 @@ function receive(reply: Reply): void {
       setBusy(null)
       if (opening) {
         opening = false
-        openStatus.textContent = ""
+        openState = { kind: "idle" }
+        paintOpenStatus()
         resetUi()
         seedUi(reply.state)
-        announce(`Opened ${reply.state.inspection.fileName}`)
+        announce(catalog().announce.opened(reply.state.inspection.fileName))
       } else if (reply.state.steps.length > before) {
         notice = null
-        announce("Done. The set was updated.")
+        announce(catalog().announce.updated)
       }
       if (!ui.libraryRootEdited) {
         ui.libraryRoot = reply.state.inspection.libraryRootGuess
@@ -235,28 +444,25 @@ function receive(reply: Reply): void {
       return
     case "openError":
       setBusy(null)
-      {
-        const message = OPEN_ERRORS[reply.code] ?? OPEN_ERRORS.crashed!
-        opening = false
-        if (state === null) {
-          openStatus.setAttribute("data-kind", "error")
-          openStatus.textContent = message
-        } else {
-          // A file is already open: keep it, and say why the new one failed.
-          notice = message
-          render()
-        }
-        announce(message)
+      opening = false
+      if (state === null) {
+        openState = { kind: "error", code: reply.code }
+        paintOpenStatus()
+      } else {
+        // A file is already open: keep it, and say why the new one failed.
+        notice = { kind: "open", code: reply.code }
+        render()
       }
+      announce(catalog().errors.open[reply.code])
       if (reply.code === "crashed") {
         worker?.terminate()
         worker = null
       }
       return
     case "refused":
-      notice = reply.message
+      notice = { kind: "refusal", refusal: reply.refusal }
       setBusy(null)
-      announce(reply.message)
+      announce(refusalText(reply.refusal))
       render()
       return
     case "mirrorPreview":
@@ -273,7 +479,7 @@ function receive(reply: Reply): void {
       link.click()
       link.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
-      announce(`Saved ${reply.name}`)
+      announce(catalog().announce.saved(reply.name))
       return
     }
   }
@@ -286,7 +492,7 @@ function seedUi(opened: SessionState): void {
   ui.bpm = inspection.masterTempo === null ? "" : String(inspection.masterTempo)
   // The sample has one pair of tracks planted to differ.
   const planted =
-    opened.synthetic &&
+    opened.origin !== "file" &&
     names.includes(SAMPLE_MIRROR_BASE) &&
     names.includes(SAMPLE_MIRROR_TARGET)
   ui.base = planted ? SAMPLE_MIRROR_BASE : (names[0] ?? "")
@@ -309,9 +515,8 @@ function requestMirrorPreview(): void {
 
 function refuseUnsupported(): boolean {
   if (supported) return false
-  openStatus.setAttribute("data-kind", "error")
-  openStatus.textContent =
-    "This browser lacks the Compression Streams API this page needs. Use a current Chrome, Edge, Firefox or Safari, or use the library from Node: npm install ableton-als."
+  openState = { kind: "error", code: "unsupported" }
+  paintOpenStatus()
   return true
 }
 
@@ -319,7 +524,7 @@ async function openFile(file: File): Promise<void> {
   if (refuseUnsupported() || ui.busy) return
   opening = true
   notice = null
-  setBusy("Reading the file…")
+  setBusy("reading_file")
   const bytes = await file.arrayBuffer()
   send({ type: "open", name: file.name, bytes }, [bytes])
 }
@@ -328,7 +533,7 @@ function openSample(which: "healthy" | "damaged"): void {
   if (refuseUnsupported() || ui.busy) return
   opening = true
   notice = null
-  setBusy("Building the sample set…")
+  setBusy("building_sample")
   send({ type: "sample", which })
 }
 
@@ -375,23 +580,27 @@ window.addEventListener("drop", (event) => {
 
 function paintPreview(inspection: Inspection): void {
   const grid = $("preview-grid")
-  grid.style.setProperty("--columns", String(inspection.tracks.length))
+  // Return tracks have no clip slots, so they get no column.
+  const tracks = inspection.tracks.filter(
+    (track) => track.type !== "ReturnTrack"
+  )
+  grid.style.setProperty("--columns", String(tracks.length))
   const cells: HTMLElement[] = []
   for (let scene = 0; scene < inspection.scenes.length; scene++) {
-    for (const track of inspection.tracks) {
+    for (const track of tracks) {
       const clip = track.clips[scene]
       const cell = h("span", clip ? { "data-clip": true } : null)
       cells.push(clip ? withColor(cell, clip.color ?? "var(--clip-none)") : cell)
     }
   }
   grid.replaceChildren(...cells)
-  const clips = inspection.audioClips + inspection.midiClips
-  $("preview-caption").textContent =
-    `The sample set as this page reads it: ${count(inspection.tracks.length, "track", "tracks")}, ${count(inspection.scenes.length, "scene", "scenes")}, ${count(clips, "clip", "clips")}. It is synthetic, written for this page and never saved by Live.`
+  previewCounts = {
+    tracks: inspection.tracks.length,
+    scenes: inspection.scenes.length,
+    clips: inspection.audioClips + inspection.midiClips,
+  }
+  paintPreviewCaption()
 }
-
-if (supported) send({ type: "preview" })
-else refuseUnsupported()
 
 // ---------------------------------------------------------------------------
 // Rendering the workspace
@@ -400,17 +609,17 @@ else refuseUnsupported()
 const actions: Actions = {
   convert() {
     if (ui.busy) return
-    setBusy("Converting to the Live 10 format…")
+    setBusy("converting")
     send({ type: "convert", libraryRoot: ui.libraryRoot })
   },
   apply(operation) {
     if (ui.busy) return
-    setBusy("Applying the repair…")
+    setBusy("repairing")
     send({ type: "tool", operation })
   },
   download() {
     if (ui.busy) return
-    setBusy("Compressing…")
+    setBusy("compressing")
     send({ type: "download" })
   },
   requestMirrorPreview,
@@ -429,17 +638,13 @@ function showLanding(): void {
   about.hidden = false
 }
 
-const TABS: readonly { readonly id: Tab; readonly label: string }[] = [
-  { id: "inspect", label: "Inspect" },
-  { id: "validate", label: "Validate" },
-  { id: "convert", label: "Convert" },
-  { id: "repair", label: "Repair" },
-]
+const TABS: readonly Tab[] = ["inspect", "validate", "convert", "repair"]
 
-const codeHost = h("aside", { class: "code-panel", "aria-label": "Code for this view" })
+const codeHost = h("aside", { class: "code-panel" })
 
 function renderCode(): void {
   if (state === null) return
+  const words = catalog().code
   const focused = document.activeElement?.getAttribute("data-key")
   const id = snippetFor(ui)
   const source = (): string =>
@@ -467,19 +672,20 @@ function renderCode(): void {
       },
       label
     )
+  codeHost.setAttribute("aria-label", words.panelLabel)
   codeHost.replaceChildren(
     h(
       "div",
       { class: "code-head" },
-      h("h3", null, "The same thing in code"),
+      h("h3", null, words.title),
       h(
         "div",
         { class: "form-row" },
         h(
           "div",
-          { class: "segmented", role: "group", "aria-label": "Runtime" },
-          runtimeButton("browser", "Browser"),
-          runtimeButton("node", "Node")
+          { class: "segmented", role: "group", "aria-label": words.runtime },
+          runtimeButton("browser", words.browser),
+          runtimeButton("node", words.node)
         ),
         copyButton(source, announce)
       )
@@ -489,7 +695,8 @@ function renderCode(): void {
       "p",
       { class: "muted small" },
       h("code", { translate: "no" }, "npm install ableton-als"),
-      ` Works with version ${__LIB_VERSION__} as published. Zero dependencies.`
+      " ",
+      words.worksWith(__LIB_VERSION__)
     )
   )
   if (focused?.startsWith("runtime-")) {
@@ -498,11 +705,14 @@ function renderCode(): void {
 }
 
 function fileBar(current: SessionState): HTMLElement {
+  const t = catalog()
+  const words = t.fileBar
   const inspection = current.inspection
   const clips = inspection.audioClips + inspection.midiClips
   const dirty = current.steps.length > 0
   const converted = current.steps.some((step) => step.kind === "convert")
-  const canDownload = dirty && current.output.blocked === null
+  const blocked = current.output.blocked
+  const canDownload = dirty && blocked === null
   return h(
     "div",
     { class: "file-bar" },
@@ -513,22 +723,22 @@ function fileBar(current: SessionState): HTMLElement {
       h(
         "div",
         { class: "file-meta" },
-        current.synthetic ? badge("idle", "Synthetic sample") : null,
-        h("span", null, inspection.version.creator || "Unknown version"),
-        h("span", null, count(inspection.tracks.length, "track", "tracks")),
-        h("span", null, count(inspection.scenes.length, "scene", "scenes")),
-        h("span", null, count(clips, "clip", "clips")),
+        current.origin === "damaged" ? badge("bad", words.damagedSample) : null,
+        h("span", null, inspection.version.creator || words.unknownVersion),
+        h("span", null, t.common.tracks(inspection.tracks.length)),
+        h("span", null, t.common.scenes(inspection.scenes.length)),
+        h("span", null, t.common.clips(clips)),
         h("span", null, formatBytes(inspection.sizeBytes)),
         inspection.problems.length === 0
-          ? badge("ok", "No structural problems")
-          : badge("bad", count(inspection.problems.length, "problem", "problems"))
+          ? badge("ok", words.noProblems)
+          : badge("bad", t.common.problems(inspection.problems.length))
       ),
-      h("p", { class: "busy", id: "busy", role: "status", hidden: !ui.busy }, busyLabel)
+      h("p", { class: "busy", id: "busy", role: "status", hidden: !ui.busy }, busyText())
     ),
     h(
       "div",
       { class: "file-actions" },
-      dirty && current.output.blocked?.reason !== "synthetic"
+      dirty && blocked?.reason !== "damaged"
         ? h(
             "button",
             {
@@ -540,11 +750,11 @@ function fileBar(current: SessionState): HTMLElement {
               type: "button",
               "data-key": "download",
               disabled: !canDownload,
-              title: current.output.blocked?.message ?? "",
+              title: blocked === null ? "" : outputText(blocked),
               onclick: () => actions.download(),
             },
             icon("download"),
-            "Download"
+            words.download
           )
         : null,
       h(
@@ -555,7 +765,7 @@ function fileBar(current: SessionState): HTMLElement {
           "data-key": "open-another",
           onclick: () => fileInput.click(),
         },
-        "Open another file"
+        words.openAnother
       ),
       h(
         "button",
@@ -566,7 +776,7 @@ function fileBar(current: SessionState): HTMLElement {
           onclick: () => send({ type: "close" }),
         },
         icon("close"),
-        "Close"
+        words.close
       )
     )
   )
@@ -574,10 +784,12 @@ function fileBar(current: SessionState): HTMLElement {
 
 function stepsBar(current: SessionState): HTMLElement | null {
   if (current.steps.length === 0) return null
+  const words = catalog().steps
+  const blocked = current.output.blocked
   return h(
     "div",
     { class: "steps" },
-    h("span", { class: "muted" }, "Changes so far"),
+    h("span", { class: "muted" }, words.title),
     h(
       "ol",
       null,
@@ -585,12 +797,12 @@ function stepsBar(current: SessionState): HTMLElement | null {
         h(
           "li",
           null,
-          step.kind === "convert" ? "Converted to Live 10" : toolTitle(step.tool)
+          step.kind === "convert" ? words.converted : toolTitle(step.tool)
         )
       )
     ),
-    current.output.blocked?.reason === "synthetic"
-      ? h("p", { class: "muted steps-note" }, current.output.blocked.message)
+    blocked?.reason === "damaged"
+      ? h("p", { class: "muted steps-note" }, outputText(blocked))
       : null,
     h(
       "div",
@@ -607,7 +819,7 @@ function stepsBar(current: SessionState): HTMLElement | null {
           },
         },
         icon("undo"),
-        "Undo last"
+        words.undo
       ),
       h(
         "button",
@@ -619,13 +831,14 @@ function stepsBar(current: SessionState): HTMLElement | null {
             if (!ui.busy) send({ type: "reset" })
           },
         },
-        "Back to the original"
+        words.reset
       )
     )
   )
 }
 
 function tabBar(current: SessionState): HTMLElement {
+  const words = catalog().tabs
   const pending = current.inspection.tools.reduce(
     (sum, tool) => sum + (tool.blocked === null ? tool.pending : 0),
     0
@@ -635,33 +848,35 @@ function tabBar(current: SessionState): HTMLElement {
     repair: pending,
   }
   const buttons = TABS.map((tab) => {
-    const total = counts[tab.id] ?? 0
+    const total = counts[tab] ?? 0
     return h(
       "button",
       {
         class: "tab",
         type: "button",
         role: "tab",
-        id: `tab-${tab.id}`,
-        "data-key": `tab-${tab.id}`,
-        "aria-selected": String(ui.tab === tab.id),
+        id: `tab-${tab}`,
+        "data-key": `tab-${tab}`,
+        "aria-selected": String(ui.tab === tab),
         "aria-controls": "tab-panel",
-        tabindex: ui.tab === tab.id ? "0" : "-1",
-        onclick: () => selectTab(tab.id),
+        tabindex: ui.tab === tab ? "0" : "-1",
+        onclick: () => selectTab(tab),
       },
-      tab.label,
-      total > 0
-        ? h("span", { class: "tab-count" }, total.toLocaleString("en"))
-        : null
+      words[tab],
+      total > 0 ? h("span", { class: "tab-count" }, formatNumber(total)) : null
     )
   })
-  const bar = h("div", { class: "tabs", role: "tablist", "aria-label": "Views" }, buttons)
+  const bar = h(
+    "div",
+    { class: "tabs", role: "tablist", "aria-label": words.label },
+    buttons
+  )
   bar.addEventListener("keydown", (event) => {
     const key = (event as KeyboardEvent).key
     if (key !== "ArrowRight" && key !== "ArrowLeft") return
-    const index = TABS.findIndex((tab) => tab.id === ui.tab)
+    const index = TABS.indexOf(ui.tab)
     const next = TABS[(index + (key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length]!
-    selectTab(next.id)
+    selectTab(next)
   })
   return bar
 }
@@ -679,6 +894,7 @@ function render(): void {
     return
   }
   const current = state
+  const words = catalog().fileBar
   const focused = document.activeElement?.getAttribute("data-key")
 
   const view =
@@ -701,7 +917,7 @@ function render(): void {
         : h(
             "div",
             { class: "notice", role: "alert" },
-            h("p", null, notice),
+            h("p", null, noticeText(notice)),
             h(
               "button",
               {
@@ -713,7 +929,7 @@ function render(): void {
                   render()
                 },
               },
-              "Dismiss"
+              words.dismiss
             )
           ),
       stepsBar(current),
@@ -733,11 +949,7 @@ function render(): void {
         ),
         codeHost
       ),
-      h(
-        "p",
-        { class: "muted small" },
-        "This set is being read on this computer only. Nothing has been uploaded."
-      ),
+      h("p", { class: "muted small" }, words.localOnly),
     ].filter((node): node is HTMLElement => node !== null)
   )
   renderCode()
@@ -746,3 +958,11 @@ function render(): void {
     workspace.querySelector<HTMLElement>(`[data-key="${focused}"]`)?.focus()
   }
 }
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+
+paintStatic()
+if (supported) send({ type: "preview" })
+else refuseUnsupported()

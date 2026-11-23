@@ -1,5 +1,7 @@
 // The four working views. Each one is a function from the worker's state to
-// DOM nodes; nothing here holds the document or touches the library.
+// DOM nodes; nothing here holds the document or touches the library. Every
+// word comes from the active catalog, read when the view is drawn, so drawing
+// again after a language change is all it takes to translate the page.
 
 import type {
   MirrorPreview,
@@ -16,19 +18,30 @@ import type {
   StepView,
   ToolView,
 } from "../engine.js"
+import { catalog } from "../i18n/index.js"
 import { describe } from "../messages.js"
 import { codeBlock, type Runtime, type SnippetId } from "./code.js"
 import {
+  around,
   badge,
-  count,
   formatBytes,
   formatNumber,
   h,
   icon,
+  rich,
   valuesList,
   withColor,
   type Child,
 } from "./dom.js"
+import {
+  blockedText,
+  doneText,
+  excerptText,
+  excerptTitle,
+  labelText,
+  outputText,
+  valueText,
+} from "./wording.js"
 
 export type Tab = "inspect" | "validate" | "convert" | "repair"
 
@@ -100,7 +113,7 @@ function changesTable(
         h(
           "tr",
           null,
-          h("th", { scope: "col" }, "What"),
+          h("th", { scope: "col" }, catalog().repair.what),
           h("th", { scope: "col" }, beforeLabel),
           h("th", { scope: "col" }, afterLabel)
         )
@@ -112,9 +125,9 @@ function changesTable(
           h(
             "tr",
             null,
-            h("th", { scope: "row" }, change.label),
-            h("td", { class: "mono", translate: "no" }, change.before),
-            h("td", { class: "mono", translate: "no" }, change.after)
+            h("th", { scope: "row" }, labelText(change.label)),
+            h("td", { class: "mono", translate: "no" }, valueText(change.before)),
+            h("td", { class: "mono", translate: "no" }, valueText(change.after))
           )
         )
       )
@@ -129,26 +142,17 @@ function changesTable(
 const SCENE_CAP = 150
 const FILE_CAP = 40
 
-const TRACK_KIND = {
-  AudioTrack: "Audio",
-  MidiTrack: "MIDI",
-  ReturnTrack: "Return",
-  GroupTrack: "Group",
-} as const
-
 function clipDetail(
   inspection: Inspection,
   selected: Ui["selected"]
 ): HTMLElement {
+  const t = catalog()
+  const words = t.inspect.clip
   const track = selected ? inspection.tracks[selected.track] : undefined
   const clip: ClipView | null | undefined =
     track && selected ? track.clips[selected.scene] : undefined
   if (!selected || !track || !clip) {
-    return h(
-      "p",
-      { class: "muted" },
-      "Select a clip to see what the file says about it. Striped clips are MIDI."
-    )
+    return h("p", { class: "muted" }, words.select)
   }
   const scene = inspection.scenes[selected.scene]
   const row = (label: string, value: Child): HTMLElement =>
@@ -157,29 +161,34 @@ function clipDetail(
     "dl",
     null,
     row(
-      "Clip",
+      words.clip,
       h(
         "span",
         null,
         withColor(h("span", { class: "swatch" }), clip.color),
-        clip.name === "" ? "(unnamed)" : clip.name
+        clip.name === "" ? t.common.unnamed : clip.name
       )
     ),
-    row("Track", track.name),
-    row("Scene", `${selected.scene + 1}${scene && scene.name ? `, ${scene.name.trim()}` : ""}`),
-    row("Kind", clip.kind === "audio" ? "Audio" : "MIDI"),
-    clip.bpm === null ? null : row("Warped at", `${formatNumber(clip.bpm)} BPM`),
-    clip.signature === null ? null : row("Time signature", clip.signature),
+    row(words.track, track.name),
+    row(
+      words.scene,
+      `${selected.scene + 1}${scene && scene.name ? `, ${scene.name.trim()}` : ""}`
+    ),
+    row(words.kind, clip.kind === "audio" ? words.audio : words.midi),
+    clip.bpm === null ? null : row(words.warpedAt, t.common.bpm(clip.bpm)),
+    clip.signature === null ? null : row(words.timeSignature, clip.signature),
     clip.lengthBeats === null
       ? null
-      : row("Loop length", `${formatNumber(clip.lengthBeats)} beats`),
+      : row(words.loopLength, words.beats(clip.lengthBeats)),
     clip.sample === null
       ? null
-      : row("File", h("span", { class: "mono", translate: "no" }, clip.sample))
+      : row(words.file, h("span", { class: "mono", translate: "no" }, clip.sample))
   )
 }
 
 function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElement {
+  const t = catalog()
+  const words = t.inspect.session
   const total = inspection.scenes.length
   const shown = ui.showAllScenes ? total : Math.min(total, SCENE_CAP)
   const detail = h(
@@ -189,17 +198,24 @@ function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElem
   )
   let pressed: HTMLButtonElement | null = null
 
+  // Return tracks have no clip slots in Live's Session view. Their columns
+  // would only show empty space, or worse, read as missing slots. The index
+  // into `inspection.tracks` is kept, because selection is keyed by it.
+  const columns = inspection.tracks
+    .map((track, trackIndex) => ({ track, trackIndex }))
+    .filter(({ track }) => track.type !== "ReturnTrack")
+
   const head = h(
     "tr",
     null,
-    h("th", { class: "corner", scope: "col" }, "Scene"),
-    inspection.tracks.map((track) =>
+    h("th", { class: "corner", scope: "col" }, words.sceneColumn),
+    columns.map(({ track }) =>
       withColor(
         h(
           "th",
           { class: "track-head", scope: "col", title: track.name },
-          h("span", null, track.name === "" ? "(unnamed)" : track.name),
-          h("span", { class: "kind" }, TRACK_KIND[track.type])
+          h("span", null, track.name === "" ? t.common.unnamed : track.name),
+          h("span", { class: "kind" }, t.inspect.trackKinds[track.type])
         ),
         track.color
       )
@@ -210,23 +226,27 @@ function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElem
   for (let scene = 0; scene < shown; scene++) {
     const info = inspection.scenes[scene]!
     const meta = [
-      info.bpm === null ? null : `${formatNumber(info.bpm)} BPM`,
+      info.bpm === null ? null : t.common.bpm(info.bpm),
       info.signature,
     ].filter((part): part is string => part !== null)
-    const cells = inspection.tracks.map((track, trackIndex) => {
+    const cells = columns.map(({ track, trackIndex }) => {
       if (scene >= track.clips.length) {
         return h(
           "td",
           null,
           h("span", {
             class: "slot slot-missing",
-            title: `${track.name} has ${track.clips.length} slots for ${total} scenes`,
+            title: words.missingSlots(track.name, track.clips.length, total),
           })
         )
       }
       const clip = track.clips[scene]
       if (!clip) return h("td", null, h("span", { class: "slot" }))
-      const label = `${track.name}, scene ${scene + 1}: ${clip.name === "" ? "unnamed clip" : clip.name}`
+      const label = words.clipLabel(
+        track.name,
+        scene + 1,
+        clip.name === "" ? words.unnamedClip : clip.name
+      )
       const isSelected =
         ui.selected?.track === trackIndex && ui.selected.scene === scene
       const button = withColor(
@@ -265,7 +285,7 @@ function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElem
             h(
               "span",
               { class: "scene-name", title: info.name },
-              info.name === "" ? "(unnamed)" : info.name
+              info.name === "" ? t.common.unnamed : info.name
             ),
             meta.length > 0
               ? h("span", { class: "scene-meta" }, meta.join(" · "))
@@ -282,7 +302,12 @@ function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElem
     { class: "block" },
     h(
       "div",
-      { class: "session-scroll", tabindex: "0", role: "group", "aria-label": "Session grid" },
+      {
+        class: "session-scroll",
+        tabindex: "0",
+        role: "group",
+        "aria-label": words.gridLabel,
+      },
       h(
         "table",
         { class: "session" },
@@ -302,7 +327,7 @@ function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElem
               actions.rerender()
             },
           },
-          `Show all ${total.toLocaleString("en")} scenes`
+          words.showAll(total)
         )
       : null,
     detail
@@ -310,11 +335,13 @@ function sessionGrid(inspection: Inspection, ui: Ui, actions: Actions): HTMLElem
 }
 
 function filesTable(inspection: Inspection, ui: Ui, actions: Actions): HTMLElement {
+  const t = catalog()
+  const words = t.inspect.files
   const legacy = (inspection.version.major ?? 0) <= 10
   const files = inspection.files
   const shown = ui.showAllFiles ? files : files.slice(0, FILE_CAP)
   if (files.length === 0) {
-    return h("p", { class: "muted" }, "This set references no files.")
+    return h("p", { class: "muted" }, words.none)
   }
   return h(
     "div",
@@ -331,10 +358,14 @@ function filesTable(inspection: Inspection, ui: Ui, actions: Actions): HTMLEleme
           h(
             "tr",
             null,
-            h("th", { scope: "col" }, "File"),
-            h("th", { scope: "col" }, "Folder"),
-            h("th", { scope: "col", class: "num" }, "Uses"),
-            h("th", { scope: "col" }, legacy ? "Alias record" : "Alias on conversion")
+            h("th", { scope: "col" }, words.file),
+            h("th", { scope: "col" }, words.folder),
+            h("th", { scope: "col", class: "num" }, words.uses),
+            h(
+              "th",
+              { scope: "col" },
+              legacy ? words.aliasRecord : words.aliasOnConversion
+            )
           )
         ),
         h(
@@ -345,24 +376,22 @@ function filesTable(inspection: Inspection, ui: Ui, actions: Actions): HTMLEleme
               "tr",
               null,
               h("td", { class: "path", translate: "no" }, file.name),
-              h(
-                "td",
-                { class: "path", translate: "no" },
-                file.folder === "" ? "not stated" : file.folder
-              ),
-              h("td", { class: "num" }, file.refs),
+              file.folder === ""
+                ? h("td", { class: "path" }, t.common.notStated)
+                : h("td", { class: "path", translate: "no" }, file.folder),
+              h("td", { class: "num" }, formatNumber(file.refs)),
               h(
                 "td",
                 null,
                 !file.audio
-                  ? badge("idle", "Not audio")
+                  ? badge("idle", words.notAudio)
                   : legacy
                     ? file.hasAlias
-                      ? badge("ok", "Present")
-                      : badge("warn", "Missing")
+                      ? badge("ok", words.present)
+                      : badge("warn", words.missing)
                     : file.external
-                      ? badge("ok", "Can be built")
-                      : badge("warn", "Not under /Volumes/")
+                      ? badge("ok", words.canBeBuilt)
+                      : badge("warn", words.notUnderVolumes)
               )
             )
           )
@@ -381,7 +410,7 @@ function filesTable(inspection: Inspection, ui: Ui, actions: Actions): HTMLEleme
               actions.rerender()
             },
           },
-          `Show all ${files.length.toLocaleString("en")} files`
+          words.showAll(files.length)
         )
       : null
   )
@@ -392,10 +421,12 @@ export function renderInspect(
   ui: Ui,
   actions: Actions
 ): readonly HTMLElement[] {
+  const t = catalog()
+  const words = t.inspect.facts
   const inspection = state.inspection
   const kinds = new Map<string, number>()
   for (const track of inspection.tracks) {
-    const kind = TRACK_KIND[track.type]
+    const kind = t.inspect.trackKinds[track.type]
     kinds.set(kind, (kinds.get(kind) ?? 0) + 1)
   }
   const clips = inspection.audioClips + inspection.midiClips
@@ -405,51 +436,49 @@ export function renderInspect(
     h(
       "dl",
       { class: "facts" },
-      fact("Saved by", inspection.version.creator || "unknown"),
+      fact(words.savedBy, inspection.version.creator || words.unknown),
       fact(
-        "Schema",
+        words.schema,
         h("span", { class: "mono", translate: "no" }, inspection.version.minorVersion)
       ),
       fact(
-        "Transport tempo",
+        words.transportTempo,
         inspection.masterTempo === null
-          ? "not stated"
-          : `${formatNumber(inspection.masterTempo)} BPM`,
-        "Where the transport was left, not always the song's tempo"
+          ? t.common.notStated
+          : t.common.bpm(inspection.masterTempo),
+        words.transportNote
       ),
-      fact("Time signature", inspection.masterSignature ?? "not stated"),
+      fact(words.timeSignature, inspection.masterSignature ?? t.common.notStated),
       fact(
-        "Tracks",
-        inspection.tracks.length,
-        [...kinds].map(([kind, total]) => `${total} ${kind}`).join(", ")
+        words.tracks,
+        formatNumber(inspection.tracks.length),
+        [...kinds]
+          .map(([kind, total]) => `${formatNumber(total)} ${kind}`)
+          .join(", ")
       ),
-      fact("Scenes", inspection.scenes.length),
+      fact(words.scenes, formatNumber(inspection.scenes.length)),
       fact(
-        "Clips",
-        clips,
-        `${inspection.audioClips} audio, ${inspection.midiClips} MIDI`
-      ),
-      fact(
-        "Referenced files",
-        inspection.files.length,
-        `${audioFiles} audio`
+        words.clips,
+        formatNumber(clips),
+        words.clipsNote(inspection.audioClips, inspection.midiClips)
       ),
       fact(
-        "Size",
+        words.referencedFiles,
+        formatNumber(inspection.files.length),
+        words.audioFiles(audioFiles)
+      ),
+      fact(
+        words.size,
         formatBytes(inspection.sizeBytes),
-        `${formatBytes(inspection.xmlLength)} of XML inside`
+        words.xmlInside(inspection.xmlLength)
       )
     ),
     block(
-      "Session",
-      h(
-        "p",
-        { class: "muted small" },
-        "Tracks across, scenes down. Each clip is painted with the colour index stored in the file."
-      ),
+      t.inspect.session.title,
+      h("p", { class: "muted small" }, t.inspect.session.note),
       sessionGrid(inspection, ui, actions)
     ),
-    block("Referenced files", filesTable(inspection, ui, actions)),
+    block(t.inspect.files.title, filesTable(inspection, ui, actions)),
   ]
 }
 
@@ -457,34 +486,12 @@ export function renderInspect(
 // Validate
 // ---------------------------------------------------------------------------
 
-const RULES: readonly {
-  readonly rule: ValidationProblem["rule"]
-  readonly name: string
-  readonly checks: string
-}[] = [
-  {
-    rule: "grid",
-    name: "Scene and track grid",
-    checks:
-      "Every clip slot list, freeze lists included, holds exactly one slot per scene. A mismatch crashes Live while the set loads.",
-  },
-  {
-    rule: "ids",
-    name: "Ids and automation targets",
-    checks:
-      "Clip automation points at a target that exists, and the Id allocator sits above every Id already used.",
-  },
-  {
-    rule: "xml",
-    name: "Document structure",
-    checks:
-      "Tags open and close in order, and no element Live expects once per parent appears twice.",
-  },
-  {
-    rule: "routing",
-    name: "Routing",
-    checks: "Every track that routes into another track points at one that exists.",
-  },
+/** The library's four rule families, in the order the page lists them. */
+const RULES: readonly ValidationProblem["rule"][] = [
+  "grid",
+  "ids",
+  "xml",
+  "routing",
 ]
 
 function problemItem(problem: {
@@ -505,14 +512,9 @@ function problemItem(problem: {
   )
 }
 
-function sentence(text: string): string {
-  const trimmed = text.trim()
-  if (trimmed === "") return trimmed
-  const capital = trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
-  return /[.!?]$/.test(capital) ? capital : `${capital}.`
-}
-
 export function renderValidate(state: SessionState): readonly HTMLElement[] {
+  const t = catalog()
+  const words = t.validate
   const problems = state.inspection.problems
   const byRule = (rule: string): number =>
     problems.filter((problem) => problem.rule === rule).length
@@ -523,9 +525,7 @@ export function renderValidate(state: SessionState): readonly HTMLElement[] {
       h(
         "p",
         null,
-        problems.length === 0
-          ? "No structural problems found in this set."
-          : `${count(problems.length, "problem", "problems")} found. Each one would make Live refuse the set or crash while loading it.`
+        problems.length === 0 ? words.none : words.found(problems.length)
       ),
       h(
         "div",
@@ -539,27 +539,27 @@ export function renderValidate(state: SessionState): readonly HTMLElement[] {
             h(
               "tr",
               null,
-              h("th", { scope: "col" }, "Check"),
-              h("th", { scope: "col" }, "What it looks for"),
-              h("th", { scope: "col" }, "Result")
+              h("th", { scope: "col" }, words.check),
+              h("th", { scope: "col" }, words.looksFor),
+              h("th", { scope: "col" }, words.result)
             )
           ),
           h(
             "tbody",
             null,
-            RULES.map((entry) => {
-              const found = byRule(entry.rule)
+            RULES.map((rule) => {
+              const found = byRule(rule)
               return h(
                 "tr",
                 null,
-                h("th", { scope: "row" }, entry.name),
-                h("td", null, entry.checks),
+                h("th", { scope: "row" }, words.rules[rule].name),
+                h("td", null, words.rules[rule].checks),
                 h(
                   "td",
                   null,
                   found === 0
-                    ? badge("ok", "Passed")
-                    : badge("bad", count(found, "problem", "problems"))
+                    ? badge("ok", words.passed)
+                    : badge("bad", t.common.problems(found))
                 )
               )
             })
@@ -569,22 +569,11 @@ export function renderValidate(state: SessionState): readonly HTMLElement[] {
     ),
     problems.length > 0
       ? block(
-          "Problems",
+          words.problemsTitle,
           h("div", { class: "items" }, problems.map(problemItem)),
-          h(
-            "p",
-            { class: "muted small" },
-            "The code and its values are stable and meant for your own wording or language. The sentence is the same message as English prose."
-          )
+          h("p", { class: "muted small" }, words.codesNote)
         )
-      : block(
-          null,
-          h(
-            "p",
-            { class: "muted" },
-            "These checks catch damage Live refuses or crashes on. They cannot prove Live opens the set: a wrong value in a field Live knows passes every structural check."
-          )
-        ),
+      : block(null, h("p", { class: "muted" }, words.cannotProve)),
   ]
 }
 
@@ -598,6 +587,8 @@ function conversionResult(
   ui: Ui,
   actions: Actions
 ): readonly HTMLElement[] {
+  const t = catalog()
+  const words = t.convert.result
   const blocked = state.output.blocked
   const { withRecord, audioRefs, offVolume } = report.aliases
   const nodes: HTMLElement[] = []
@@ -612,12 +603,16 @@ function conversionResult(
           "p",
           null,
           blocked?.reason === "invalid"
-            ? badge("bad", "Converted, but not safe to open")
-            : badge("ok", "Converted"),
+            ? badge("bad", words.convertedUnsafe)
+            : badge("ok", words.converted),
           " ",
-          `${count(report.scenesConverted, "scene", "scenes")} rewritten, ${count(report.warnings.length, "warning", "warnings")}, ${count(report.problems.length, "validation problem", "validation problems")}.`
+          words.summary(
+            report.scenesConverted,
+            report.warnings.length,
+            report.problems.length
+          )
         ),
-        blocked?.reason === "synthetic"
+        blocked?.reason === "damaged"
           ? null
           : h(
               "button",
@@ -629,27 +624,28 @@ function conversionResult(
                 onclick: () => actions.download(),
               },
               icon("download"),
-              "Download the Live 10 set"
+              words.download
             )
       ),
       blocked === null
         ? h(
             "p",
             { class: "muted" },
-            "Saved as ",
-            h("span", { class: "mono", translate: "no" }, state.output.name),
-            ", never over your original. Open the result in Live 10 and check it before you rely on it."
+            around(
+              words.savedAs,
+              h("span", { class: "mono", translate: "no" }, state.output.name)
+            )
           )
-        : blocked.reason === "synthetic"
+        : blocked.reason === "damaged"
           ? null
-          : h("p", null, blocked.message)
+          : h("p", null, outputText(blocked))
     )
   )
 
   if (report.problems.length > 0) {
     nodes.push(
       block(
-        "Validation problems in the result",
+        words.problemsTitle,
         h("div", { class: "items" }, report.problems.map(problemItem))
       )
     )
@@ -658,12 +654,8 @@ function conversionResult(
   if (report.warnings.length > 0) {
     nodes.push(
       block(
-        "Warnings",
-        h(
-          "p",
-          { class: "muted small" },
-          "What Live 10 has no way to store, or what the page could not work out."
-        ),
+        words.warningsTitle,
+        h("p", { class: "muted small" }, words.warningsNote),
         h("div", { class: "items" }, report.warnings.map(problemItem))
       )
     )
@@ -671,37 +663,25 @@ function conversionResult(
 
   nodes.push(
     block(
-      "Audio references",
+      words.audioTitle,
       h(
         "p",
         null,
-        audioRefs === 0
-          ? "This set references no audio files."
-          : `An alias record was written for ${withRecord.toLocaleString("en")} of ${count(audioRefs, "audio reference", "audio references")}. Live 10 finds audio by that record, not by the path next to it.`
+        audioRefs === 0 ? words.noAudio : words.aliasWritten(withRecord, audioRefs)
       ),
-      offVolume > 0
-        ? h(
-            "p",
-            null,
-            `${count(offVolume, "reference is", "references are")} not under /Volumes/, and the record for the startup disk has never been measured, so none was written. Live 10 will ask you to locate ${offVolume === 1 ? "that file" : "those files"} once.`
-          )
-        : null
+      offVolume > 0 ? h("p", null, words.offVolume(offVolume)) : null
     )
   )
 
   nodes.push(
-    block("What changed", changesTable(report.changes, "Live 12", "Live 10"))
+    block(words.changedTitle, changesTable(report.changes, "Live 12", "Live 10"))
   )
 
   if (report.tagDeltas.length > 0) {
     nodes.push(
       block(
-        "Elements added and removed",
-        h(
-          "p",
-          { class: "muted small" },
-          "Live 10 refuses elements it does not know and crashes without some that Live 12 stopped writing. Counted across the whole document."
-        ),
+        words.elementsTitle,
+        h("p", { class: "muted small" }, words.elementsNote),
         h(
           "div",
           { class: "table-scroll" },
@@ -714,9 +694,9 @@ function conversionResult(
               h(
                 "tr",
                 null,
-                h("th", { scope: "col" }, "Element"),
-                h("th", { scope: "col", class: "num" }, "In the Live 12 set"),
-                h("th", { scope: "col", class: "num" }, "In the Live 10 set")
+                h("th", { scope: "col" }, words.element),
+                h("th", { scope: "col", class: "num" }, words.inV12),
+                h("th", { scope: "col", class: "num" }, words.inV10)
               )
             ),
             h(
@@ -727,8 +707,8 @@ function conversionResult(
                   "tr",
                   null,
                   h("td", { class: "mono", translate: "no" }, delta.tag),
-                  h("td", { class: "num" }, delta.before.toLocaleString("en")),
-                  h("td", { class: "num" }, delta.after.toLocaleString("en"))
+                  h("td", { class: "num" }, formatNumber(delta.before)),
+                  h("td", { class: "num" }, formatNumber(delta.after))
                 )
               )
             )
@@ -738,7 +718,7 @@ function conversionResult(
           ? h(
               "p",
               { class: "muted small" },
-              `And ${report.tagDeltaCount - report.tagDeltas.length} more element names whose count changed.`
+              words.moreElements(report.tagDeltaCount - report.tagDeltas.length)
             )
           : null
       )
@@ -748,53 +728,38 @@ function conversionResult(
   for (const excerpt of report.excerpts) {
     nodes.push(
       block(
-        excerpt.title,
+        excerptTitle(excerpt.title),
         h(
           "div",
           { class: "excerpt" },
           h(
             "figure",
             null,
-            h("figcaption", null, "Before, as Live 12 wrote it"),
-            codeBlock(excerpt.before, "xml")
+            h("figcaption", null, words.before),
+            codeBlock(excerptText(excerpt.before), "xml")
           ),
           h(
             "figure",
             null,
-            h("figcaption", null, "After, as Live 10 expects it"),
-            codeBlock(excerpt.after, "xml")
+            h("figcaption", null, words.after),
+            codeBlock(excerptText(excerpt.after), "xml")
           )
         )
       )
     )
   }
 
+  const cannot = t.convert.cannot
   nodes.push(
     block(
-      "What a conversion cannot bring back",
+      cannot.title,
       h(
         "ul",
         { class: "plain-list" },
-        h(
-          "li",
-          null,
-          "Follow action Jump exists from Live 11 on. Clips using it are set to no action, with a warning."
-        ),
-        h(
-          "li",
-          null,
-          "A reference that pointed at a folder arrives from Live 12 empty. There is nothing to rebuild it from."
-        ),
-        h(
-          "li",
-          null,
-          "A folder name longer than 31 characters is written in full inside the alias record, where Live would shorten it. Sets built this way opened in Live 10 with every clip loaded."
-        ),
-        h(
-          "li",
-          null,
-          "Scene colours follow the measured track mapping. A coloured scene was never measured directly."
-        )
+        h("li", null, cannot.jump),
+        h("li", null, cannot.folderRef),
+        h("li", null, cannot.longFolder),
+        h("li", null, cannot.sceneColours)
       )
     )
   )
@@ -807,6 +772,7 @@ export function renderConvert(
   ui: Ui,
   actions: Actions
 ): readonly HTMLElement[] {
+  const words = catalog().convert
   const inspection = state.inspection
   const step = state.steps.find(
     (candidate): candidate is Extract<StepView, { kind: "convert" }> =>
@@ -821,9 +787,9 @@ export function renderConvert(
         h(
           "p",
           null,
-          badge("idle", "Nothing to convert"),
+          badge("idle", words.nothingToConvert),
           " ",
-          `This set was saved by ${inspection.version.creator || "Live 10 or older"}. Live 10 opens it as it is, and newer versions migrate it forward on their own.`
+          words.alreadyV10(inspection.version.creator || words.live10OrOlder)
         )
       ),
     ]
@@ -832,24 +798,8 @@ export function renderConvert(
     return [
       block(
         null,
-        h(
-          "p",
-          null,
-          badge("warn", "Not converted"),
-          " ",
-          "This set was saved by Live 11, and this conversion has only been measured on Live 12 sets. A guess here produces a file that passes every check and then crashes Live 10 with no message, so the page declines."
-        ),
-        h(
-          "p",
-          null,
-          "If you can share a Live 11 set, ",
-          h(
-            "a",
-            { href: "https://github.com/kevinkirsten/ableton-als/issues" },
-            "open an issue with the file attached"
-          ),
-          ". That is the measurement the project is missing."
-        )
+        h("p", null, badge("warn", words.notConverted), " ", words.unverified),
+        h("p", null, rich(words.shareLive11))
       ),
     ]
   }
@@ -857,15 +807,11 @@ export function renderConvert(
   return [
     block(
       null,
-      h(
-        "p",
-        null,
-        "Live has no downgrade path: a set saved in Live 12 will not open in Live 10. This rebuilds the document the older version expects and leaves everything it does not need to touch byte for byte as it was."
-      ),
+      h("p", null, words.intro),
       h(
         "div",
         { class: "field" },
-        h("label", { for: "library-root" }, "Library folder"),
+        h("label", { for: "library-root" }, words.libraryFolder),
         h("input", {
           class: "input mono",
           id: "library-root",
@@ -882,11 +828,7 @@ export function renderConvert(
             actions.refreshCode()
           },
         }),
-        h(
-          "p",
-          { class: "hint" },
-          "The folder your audio lives under, read from the set. Audio outside it converts too and is listed as a warning."
-        )
+        h("p", { class: "hint" }, words.libraryHint)
       ),
       h(
         "div",
@@ -900,35 +842,19 @@ export function renderConvert(
             disabled: ui.busy,
             onclick: () => actions.convert(),
           },
-          "Convert to Live 10"
+          words.button
         )
       )
     ),
     block(
-      "What the conversion does",
+      words.does.title,
       h(
         "ul",
         { class: "plain-list" },
-        h(
-          "li",
-          null,
-          "Moves each scene's tempo and time signature back into the scene name, the only place Live 10 reads them from."
-        ),
-        h(
-          "li",
-          null,
-          "Re-encodes track and scene colours. Both versions share one palette of 70 colours and store its indices differently."
-        ),
-        h(
-          "li",
-          null,
-          "Rewrites every sample reference and builds the macOS alias record Live 10 uses to find the audio."
-        ),
-        h(
-          "li",
-          null,
-          "Removes the elements Live 10 does not know and restores the ones it needs, then validates the result before offering it."
-        )
+        h("li", null, words.does.tempo),
+        h("li", null, words.does.colours),
+        h("li", null, words.does.samples),
+        h("li", null, words.does.elements)
       )
     ),
   ]
@@ -938,39 +864,13 @@ export function renderConvert(
 // Repair
 // ---------------------------------------------------------------------------
 
-const TOOLS: Readonly<
-  Record<ToolId, { readonly title: string; readonly fn: string; readonly about: string }>
-> = {
-  pointeeIds: {
-    title: "Duplicate automation Ids",
-    fn: "fixPointeeIds",
-    about:
-      "Two automation or modulation targets sharing one Id make Live 12 refuse the set. This renumbers the extra occurrences and moves the Id allocator past them.",
-  },
-  rewarp: {
-    title: "Clips warped at the wrong tempo",
-    fn: "rewarpClips",
-    about:
-      "Changing a clip's BPM in Live moves its warp marker and leaves the loop windows in the old beat scale, so the clip drifts. This rescales every beat value of every audio clip to the tempo you give. Follow times are a scene length and are left alone, so run the follow action repair after this one.",
-  },
-  followActions: {
-    title: "Follow actions out of step",
-    fn: "syncFollowActions",
-    about:
-      "Enables each clip's follow action, unlinks it from the clip length, and sets its time to the real length of its scene.",
-  },
-  mirrorTrack: {
-    title: "Copy clip geometry between tracks",
-    fn: "mirrorTrackGeometry",
-    about:
-      "Copies loop windows, warp markers and follow times from one track onto another, scene by scene. Each track keeps its own audio.",
-  },
-  relinkSamples: {
-    title: "Samples that point at another machine",
-    fn: "relinkFileRefs",
-    about:
-      "A set put together on another computer carries that computer's paths, and every clip opens missing. This re-roots each reference at your copy of the library and rebuilds its alias record.",
-  },
+/** The library function behind each repair. Code, so never translated. */
+const TOOL_FUNCTION: Readonly<Record<ToolId, string>> = {
+  pointeeIds: "fixPointeeIds",
+  rewarp: "rewarpClips",
+  followActions: "syncFollowActions",
+  mirrorTrack: "mirrorTrackGeometry",
+  relinkSamples: "relinkFileRefs",
 }
 
 export const TOOL_ORDER: readonly ToolId[] = [
@@ -982,16 +882,17 @@ export const TOOL_ORDER: readonly ToolId[] = [
 ]
 
 export function toolTitle(tool: ToolId): string {
-  return TOOLS[tool].title
+  return catalog().repair.tools[tool].title
 }
 
 function toolStatus(tool: ToolView): HTMLElement {
-  if (tool.blocked !== null) return badge("idle", "Not available")
-  if (tool.pending > 0) return badge("warn", `${tool.pending.toLocaleString("en")} to fix`)
+  const words = catalog().repair.status
+  if (tool.blocked !== null) return badge("idle", words.notAvailable)
+  if (tool.pending > 0) return badge("warn", words.toFix(tool.pending))
   if (tool.id === "mirrorTrack" || tool.id === "relinkSamples") {
-    return badge("idle", "On request")
+    return badge("idle", words.onRequest)
   }
-  return badge("ok", "Nothing to fix")
+  return badge("ok", words.nothingToFix)
 }
 
 function toolControls(
@@ -1000,8 +901,8 @@ function toolControls(
   ui: Ui,
   actions: Actions
 ): HTMLElement {
+  const words = catalog().repair
   const applyButton = (
-    label: string,
     operation: () => Operation | null,
     enabled = true
   ): HTMLElement =>
@@ -1017,7 +918,7 @@ function toolControls(
           if (next !== null) actions.apply(next)
         },
       },
-      label
+      words.tools[tool.id].button
     )
 
   switch (tool.id) {
@@ -1025,13 +926,13 @@ function toolControls(
       return h(
         "div",
         null,
-        applyButton("Renumber duplicates", () => ({ tool: "pointeeIds" }), tool.pending > 0)
+        applyButton(() => ({ tool: "pointeeIds" }), tool.pending > 0)
       )
     case "followActions":
       return h(
         "div",
         null,
-        applyButton("Sync follow actions", () => ({ tool: "followActions" }), tool.pending > 0)
+        applyButton(() => ({ tool: "followActions" }), tool.pending > 0)
       )
     case "rewarp":
       return h(
@@ -1040,7 +941,7 @@ function toolControls(
         h(
           "div",
           { class: "field narrow" },
-          h("label", { for: "rewarp-bpm" }, "Target BPM"),
+          h("label", { for: "rewarp-bpm" }, words.targetBpm),
           h("input", {
             class: "input",
             id: "rewarp-bpm",
@@ -1057,7 +958,7 @@ function toolControls(
             },
           })
         ),
-        applyButton("Rescale clips", () => {
+        applyButton(() => {
           const bpm = Number(ui.bpm)
           return Number.isFinite(bpm) && bpm >= 20 && bpm <= 999
             ? { tool: "rewarp", bpm }
@@ -1082,6 +983,7 @@ function toolControls(
               class: "select",
               id,
               "data-key": id,
+              translate: "no",
               onchange: (event) => {
                 set((event.target as HTMLSelectElement).value)
                 actions.requestMirrorPreview()
@@ -1101,26 +1003,29 @@ function toolControls(
         h(
           "div",
           { class: "form-row" },
-          select("mirror-base", "Copy from", ui.base, (next) => {
+          select("mirror-base", words.copyFrom, ui.base, (next) => {
             ui.base = next
           }),
-          select("mirror-target", "Onto", ui.target, (next) => {
+          select("mirror-target", words.onto, ui.target, (next) => {
             ui.target = next
           }),
           applyButton(
-            "Copy geometry",
             () => ({ tool: "mirrorTrack", base: ui.base, target: ui.target }),
             ui.base !== ui.target && (preview === null || preview.differing > 0)
           )
         ),
         ui.base === ui.target
-          ? h("p", { class: "muted small" }, "Pick two different tracks.")
+          ? h("p", { class: "muted small" }, words.pickTwo)
           : preview === null
             ? null
             : h(
                 "p",
                 { class: "muted small" },
-                `${count(preview.shared, "scene has", "scenes have")} a clip on both tracks, and ${preview.differing} of them differ. ${preview.baseOnly + preview.targetOnly} with a clip on one side only are left alone.`
+                words.mirrorPreview(
+                  preview.shared,
+                  preview.differing,
+                  preview.baseOnly + preview.targetOnly
+                )
               )
       )
     }
@@ -1131,7 +1036,7 @@ function toolControls(
         h(
           "div",
           { class: "field" },
-          h("label", { for: "relink-root" }, "Where the library is on this machine"),
+          h("label", { for: "relink-root" }, words.relinkLabel),
           h("input", {
             class: "input mono",
             id: "relink-root",
@@ -1147,13 +1052,9 @@ function toolControls(
               actions.refreshCode()
             },
           }),
-          h(
-            "p",
-            { class: "hint" },
-            "The folder must have the same name it had on the machine that saved the set. Everything inside keeps its place."
-          )
+          h("p", { class: "hint" }, words.relinkHint)
         ),
-        applyButton("Relink samples", () =>
+        applyButton(() =>
           ui.relinkRoot.trim() === ""
             ? null
             : { tool: "relinkSamples", libraryRoot: ui.relinkRoot }
@@ -1167,6 +1068,7 @@ export function renderRepair(
   ui: Ui,
   actions: Actions
 ): readonly HTMLElement[] {
+  const words = catalog().repair
   const byId = new Map(state.inspection.tools.map((tool) => [tool.id, tool]))
   const lastStep = (id: ToolId): Extract<StepView, { kind: "tool" }> | undefined => {
     for (let index = state.steps.length - 1; index >= 0; index--) {
@@ -1179,7 +1081,7 @@ export function renderRepair(
   const sections = TOOL_ORDER.map((id) => {
     const tool = byId.get(id)
     if (!tool) return null
-    const meta = TOOLS[id]
+    const meta = words.tools[id]
     const applied = lastStep(id)
     const section = h(
       "section",
@@ -1188,7 +1090,7 @@ export function renderRepair(
         "div",
         { class: "tool-head" },
         h("h3", null, meta.title),
-        h("span", { class: "code-tag", translate: "no" }, meta.fn),
+        h("span", { class: "code-tag", translate: "no" }, TOOL_FUNCTION[id]),
         toolStatus(tool)
       ),
       h("p", null, meta.about),
@@ -1197,7 +1099,12 @@ export function renderRepair(
             "dl",
             { class: "inline-facts" },
             tool.facts.map((entry) =>
-              h("div", null, h("dt", null, entry.label), h("dd", null, entry.value))
+              h(
+                "div",
+                null,
+                h("dt", null, labelText(entry.label)),
+                h("dd", null, valueText(entry.value))
+              )
             )
           )
         : null,
@@ -1209,9 +1116,9 @@ export function renderRepair(
             h(
               "span",
               { class: "muted" },
-              sentence(tool.blocked.detail),
+              blockedText(tool.blocked),
               id === "relinkSamples" && state.inspection.convert.state === "ready"
-                ? " Convert the set to Live 10 first: the conversion writes these references."
+                ? ` ${words.convertFirst}`
                 : ""
             )
           )
@@ -1220,8 +1127,8 @@ export function renderRepair(
         ? h(
             "div",
             { class: "block" },
-            h("p", null, badge("ok", "Applied"), " ", sentence(applied.summary)),
-            changesTable(applied.changes, "Before", "After")
+            h("p", null, badge("ok", words.applied), " ", doneText(applied)),
+            changesTable(applied.changes, words.before, words.after)
           )
         : null
     )
@@ -1232,11 +1139,7 @@ export function renderRepair(
   })
 
   return [
-    h(
-      "p",
-      { class: "muted" },
-      "Each repair reads the set first and says what it would change. Nothing is applied until you ask, repairs stack on the same file, and the last one can be undone."
-    ),
+    h("p", { class: "muted" }, words.intro),
     h("div", { class: "tools" }, sections),
   ]
 }

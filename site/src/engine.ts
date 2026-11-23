@@ -32,12 +32,16 @@ import {
   rewarpClips,
   supportsTool,
   syncFollowActions,
+  PORTABLE_VOLUME_ATTRIBUTES,
   SYNTHETIC_CREATION_TIME,
   unescapeXml,
   validateGeneratedSet,
   type AlsVersion,
   type DowngradeWarning,
+  type FollowReport,
   type MirrorPreview,
+  type PointeeReport,
+  type RewarpReport,
   type ToolId,
   type ToolOutcome,
   type ValidationProblem,
@@ -88,13 +92,75 @@ export type FileRefView = {
   readonly hasAlias: boolean
 }
 
-export type Blocked = {
-  readonly code: string
-  readonly values: Readonly<Record<string, string | number>>
-  readonly detail: string
-}
+/**
+ * Why a repair cannot run. A code and its values, never prose: the page words
+ * it in the visitor's language. The codes are the library's own `BlockedCode`.
+ */
+export type Blocked =
+  | {
+      readonly code: "unsupported_version"
+      readonly values: { readonly version: number | "?" }
+      /** The whole version was never verified, as opposed to this one tool. */
+      readonly untested: boolean
+    }
+  | {
+      readonly code: "colliding_pointee_ids"
+      readonly values: { readonly ids: string }
+    }
+  | {
+      readonly code: "mixed_clip_durations"
+      readonly values: { readonly count: number }
+    }
+  | {
+      readonly code: "needs_two_tracks"
+      readonly values: Record<never, never>
+    }
 
-export type Fact = { readonly label: string; readonly value: string }
+/**
+ * What a fact is about. A stable key the page maps to a label; the two that
+ * name something in the set carry it along.
+ */
+export type Label =
+  | {
+      readonly key:
+        | "automationTargets"
+        | "duplicatedIds"
+        | "extraOccurrences"
+        | "audioClips"
+        | "clipsWarpedAt"
+        | "gridBpm"
+        | "masterBpm"
+        | "clips"
+        | "needEnable"
+        | "needUnlink"
+        | "needRetime"
+        | "tracksWithClips"
+        | "sharedScenes"
+        | "differingScenes"
+        | "firstAudioRef"
+        | "refsWithAlias"
+        | "audioRefsWithAlias"
+        | "savedBy"
+        | "schema"
+    }
+  /** The name of a scene; `scene` counts from 1. */
+  | { readonly key: "sceneName"; readonly scene: number }
+  | { readonly key: "trackColor"; readonly track: string }
+
+/**
+ * A fact's value, as data. A number is a count or a BPM, a string is text
+ * taken from the file and shown as it is, `null` means the file states none.
+ */
+export type FactValue =
+  | number
+  | string
+  | null
+  /** So many out of so many. */
+  | { readonly part: number; readonly total: number }
+  /** Warp BPM and how many clips use it, most used first. */
+  | { readonly byBpm: readonly (readonly [number, number])[] }
+
+export type Fact = { readonly label: Label; readonly value: FactValue }
 
 export type ToolView = {
   readonly id: ToolId
@@ -133,9 +199,9 @@ export type Inspection = {
 }
 
 export type Change = {
-  readonly label: string
-  readonly before: string
-  readonly after: string
+  readonly label: Label
+  readonly before: FactValue
+  readonly after: FactValue
 }
 
 export type TagDelta = {
@@ -144,10 +210,35 @@ export type TagDelta = {
   readonly after: number
 }
 
+export type ExcerptTitle =
+  | { readonly key: "header" }
+  /** `scene` counts from 1. */
+  | { readonly key: "scene"; readonly scene: number }
+  | { readonly key: "firstAudioRef" }
+
+/**
+ * A fragment of XML laid out for reading. The two things it leaves out are
+ * kept as numbers, so the page can say so in the visitor's language.
+ */
+export type PrettyXml = {
+  readonly lines: readonly PrettyLine[]
+  /** Lines left out at the end. 0 when the whole fragment is there. */
+  readonly hiddenLines: number
+}
+
+export type PrettyLine =
+  | string
+  /** A long hex payload cut short: where it starts, and its full length. */
+  | {
+      readonly indent: string
+      readonly head: string
+      readonly hexChars: number
+    }
+
 export type Excerpt = {
-  readonly title: string
-  readonly before: string
-  readonly after: string
+  readonly title: ExcerptTitle
+  readonly before: PrettyXml
+  readonly after: PrettyXml
 }
 
 export type ConversionReport = {
@@ -171,8 +262,10 @@ export type StepView =
   | {
       readonly kind: "tool"
       readonly tool: ToolId
-      readonly summary: string
+      /** How many items the repair rewrote: Ids, clips or references. */
       readonly changed: number
+      /** Items it had to leave as they were. Only relinking reports any. */
+      readonly skipped: number
       readonly changes: readonly Change[]
     }
   | { readonly kind: "convert"; readonly report: ConversionReport }
@@ -188,25 +281,106 @@ export type Operation =
     }
   | { readonly tool: "relinkSamples"; readonly libraryRoot: string }
 
+/**
+ * Where the opened document came from. The built-in sample is a set Live 12
+ * saved; the damaged one is that set with structural damage planted in it.
+ */
+export type Origin = "file" | "sample" | "damaged"
+
 export type SessionState = {
-  /** The built-in sample: a skeleton, never saved by Live. */
-  readonly synthetic: boolean
+  readonly origin: Origin
   readonly inspection: Inspection
   readonly steps: readonly StepView[]
   readonly canUndo: boolean
   readonly output: {
     readonly name: string
     /** Why the result is not offered for download, or `null` when it is. */
-    readonly blocked: {
-      readonly reason: "unchanged" | "synthetic" | "invalid"
-      readonly message: string
-    } | null
+    readonly blocked: OutputBlocked | null
   }
 }
 
+export type OutputBlocked =
+  | { readonly reason: "unchanged" }
+  /** The damaged sample: Live would refuse anything made from it. */
+  | { readonly reason: "damaged" }
+  /** `problems` is how many validation problems the converted set has. */
+  | { readonly reason: "invalid"; readonly problems: number }
+
+/**
+ * Why an action was refused. Like `Blocked`, a code and its values: nothing
+ * the engine returns is a sentence.
+ */
+export type Refusal =
+  | Blocked
+  | { readonly code: "nothing_to_change"; readonly values: Record<never, never> }
+  | { readonly code: "already_v10"; readonly values: Record<never, never> }
+  | {
+      readonly code: "unverified_version"
+      readonly values: { readonly version: number }
+    }
+  | { readonly code: "invalid_bpm"; readonly values: Record<never, never> }
+  | { readonly code: "no_warped_clips"; readonly values: Record<never, never> }
+  | { readonly code: "same_track"; readonly values: Record<never, never> }
+  | {
+      readonly code: "track_without_clips"
+      readonly values: { readonly track: string }
+    }
+  | {
+      readonly code: "relative_library_root"
+      readonly values: Record<never, never>
+    }
+  | {
+      readonly code: "relink_unresolved"
+      readonly values: { readonly count: number; readonly folder: string }
+    }
+  | {
+      readonly code: "relink_already_there"
+      readonly values: Record<never, never>
+    }
+  | { readonly code: "output_unchanged"; readonly values: Record<never, never> }
+  | { readonly code: "output_damaged"; readonly values: Record<never, never> }
+  | {
+      readonly code: "output_invalid"
+      readonly values: { readonly problems: number }
+    }
+  /**
+   * The library refused and gave only English prose, no code. The engine
+   * checks every refusal it knows of first, so this is the fallback for one
+   * a newer library adds.
+   */
+  | {
+      readonly code: "library_error"
+      readonly values: { readonly detail: string }
+    }
+
 export type ActionResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly error: string }
+  | { readonly ok: false; readonly refusal: Refusal }
+
+/** What the worker is doing right now, as a code the page words. */
+export type Phase =
+  | "reading_file"
+  | "building_sample"
+  | "decompressing"
+  | "reading_structure"
+  | "listing_files"
+  | "validating"
+  | "diagnosing"
+  | "converting"
+  | "repairing"
+  | "compressing"
+
+/** The refusal that goes with a result that is not offered for download. */
+export function outputRefusal(blocked: OutputBlocked): Refusal {
+  switch (blocked.reason) {
+    case "unchanged":
+      return { code: "output_unchanged", values: {} }
+    case "damaged":
+      return { code: "output_damaged", values: {} }
+    case "invalid":
+      return { code: "output_invalid", values: { problems: blocked.problems } }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Opening a file
@@ -413,10 +587,6 @@ function slotExtrasByTrack(
   return byTrack
 }
 
-function formatNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)))
-}
-
 function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
   const pointee = inspectPointeeIds(xml)
   const rewarp = inspectRewarp(xml)
@@ -426,13 +596,7 @@ function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
   const followSupported = supportsTool("followActions", version)
   const follow = followSupported ? inspectFollowActions(xml) : null
 
-  const unsupported = (): Blocked => ({
-    code: "unsupported_version",
-    values: { version: version.major ?? "?" },
-    detail: isUntestedVersion(version)
-      ? `Live ${version.major} files have not been verified yet, so no fix runs on them`
-      : `this tool does not run on Live ${version.major ?? "?"} files`,
-  })
+  const unsupported = (): Blocked => unsupportedVersion(version)
 
   const gridOff =
     rewarp.gridBpm !== null &&
@@ -450,14 +614,9 @@ function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
           ? {
               code: "colliding_pointee_ids",
               values: { ids: pointee.collidingReferences.join(", ") },
-              detail: `automation points at a duplicated Id (${pointee.collidingReferences.join(", ")}), so renumbering would attach it to the wrong occurrence`,
             }
           : null,
-      facts: [
-        { label: "Automation targets", value: String(pointee.targets) },
-        { label: "Duplicated Ids", value: String(pointee.duplicatedIds.length) },
-        { label: "Extra occurrences", value: String(pointee.extraOccurrences) },
-      ],
+      facts: pointeeFacts(pointee),
     },
     {
       id: "rewarp",
@@ -465,17 +624,8 @@ function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
       pending: gridOff ? rewarp.clips : 0,
       blocked: !supportsTool("rewarp", version) ? unsupported() : null,
       facts: [
-        { label: "Audio clips", value: String(rewarp.clips) },
-        { label: "Clips warped at", value: bpmSpread(rewarp.byBpm) },
-        {
-          label: "Grid BPM",
-          value: rewarp.gridBpm === null ? "none" : formatNumber(rewarp.gridBpm),
-        },
-        {
-          label: "Master BPM",
-          value:
-            rewarp.masterBpm === null ? "none" : formatNumber(rewarp.masterBpm),
-        },
+        { label: { key: "audioClips" }, value: rewarp.clips },
+        ...rewarpFacts(rewarp),
       ],
     },
     {
@@ -491,17 +641,14 @@ function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
           ? {
               code: "mixed_clip_durations",
               values: { count: follow.conflicting.length },
-              detail: `${follow.conflicting.length} scene(s) have clips with different durations, and without one duration per row there is no way to tell when to jump`,
             }
           : null,
       facts:
         follow === null
           ? []
           : [
-              { label: "Clips", value: String(follow.clips) },
-              { label: "Need enabling", value: String(follow.needEnable) },
-              { label: "Need unlinking", value: String(follow.needUnlink) },
-              { label: "Need retiming", value: String(follow.needRetime) },
+              { label: { key: "clips" }, value: follow.clips },
+              ...followFacts(follow),
             ],
     },
     {
@@ -511,13 +658,9 @@ function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
       blocked: !supportsTool("mirrorTrack", version)
         ? unsupported()
         : trackNames.length < 2
-          ? {
-              code: "needs_two_tracks",
-              values: {},
-              detail: "the file does not have two tracks with clips",
-            }
+          ? { code: "needs_two_tracks", values: {} }
           : null,
-      facts: [{ label: "Tracks with clips", value: String(trackNames.length) }],
+      facts: [{ label: { key: "tracksWithClips" }, value: trackNames.length }],
     },
     {
       id: "relinkSamples",
@@ -529,21 +672,46 @@ function diagnoseTools(xml: string, version: AlsVersion): readonly ToolView[] {
   ]
 }
 
-function bpmSpread(byBpm: readonly (readonly [number, number])[]): string {
-  if (byBpm.length === 0) return "none"
-  const shown = byBpm
-    .slice(0, 4)
-    .map(([bpm, count]) => `${formatNumber(bpm)} (${count})`)
-    .join(", ")
-  return byBpm.length > 4 ? `${shown}, +${byBpm.length - 4} more` : shown
+// Two different reasons to refuse, and the visitor needs to know which: the
+// whole version was never verified, or only this tool does not cover it.
+function unsupportedVersion(version: AlsVersion): Blocked {
+  return {
+    code: "unsupported_version",
+    values: { version: version.major ?? "?" },
+    untested: isUntestedVersion(version),
+  }
+}
+
+function pointeeFacts(report: PointeeReport): readonly Fact[] {
+  return [
+    { label: { key: "automationTargets" }, value: report.targets },
+    { label: { key: "duplicatedIds" }, value: report.duplicatedIds.length },
+    { label: { key: "extraOccurrences" }, value: report.extraOccurrences },
+  ]
+}
+
+function rewarpFacts(report: RewarpReport): readonly Fact[] {
+  return [
+    { label: { key: "clipsWarpedAt" }, value: { byBpm: report.byBpm } },
+    { label: { key: "gridBpm" }, value: report.gridBpm },
+    { label: { key: "masterBpm" }, value: report.masterBpm },
+  ]
+}
+
+function followFacts(report: FollowReport): readonly Fact[] {
+  return [
+    { label: { key: "needEnable" }, value: report.needEnable },
+    { label: { key: "needUnlink" }, value: report.needUnlink },
+    { label: { key: "needRetime" }, value: report.needRetime },
+  ]
 }
 
 export function inspect(
   xml: string,
   meta: { readonly fileName: string; readonly sizeBytes: number },
-  phase: (label: string) => void = () => {}
+  phase: (phase: Phase) => void = () => {}
 ): Inspection {
-  phase("Reading tracks, scenes and clips…")
+  phase("reading_structure")
   const version = detectVersion(xml)
   const document = parseAlsDocument(xml)
   const legacy = version.major !== null && version.major <= 10
@@ -607,13 +775,13 @@ export function inspect(
     }
   })
 
-  phase("Listing referenced files…")
+  phase("listing_files")
   const files = summarizeFileRefs(rawRefs)
 
-  phase("Checking the structure Live depends on…")
+  phase("validating")
   const problems = validateGeneratedSet(xml)
 
-  phase("Looking for repairs…")
+  phase("diagnosing")
   const tools = diagnoseTools(xml, version)
 
   const major = version.major ?? 0
@@ -655,17 +823,20 @@ export function inspect(
  * Re-indents a fragment for display. The converter writes some elements on a
  * single line, and a 2,000 character line teaches nobody anything.
  */
-export function prettyXml(fragment: string, maxLines = 18): string {
+export function prettyXml(fragment: string, maxLines = 18): PrettyXml {
   const tokens = fragment.match(/<[^>]+>|[^<]+/g) ?? []
-  const lines: string[] = []
+  const lines: PrettyLine[] = []
   let depth = 0
   for (const token of tokens) {
     if (!token.startsWith("<")) {
       const text = token.replace(/\s+/g, "")
       if (text === "") continue
-      const shown =
-        text.length > 48 ? `${text.slice(0, 48)}… (${text.length} hex chars)` : text
-      lines.push(`${"  ".repeat(depth)}${shown}`)
+      const indent = "  ".repeat(depth)
+      lines.push(
+        text.length > 48
+          ? { indent, head: text.slice(0, 48), hexChars: text.length }
+          : `${indent}${text}`
+      )
       continue
     }
     const closing = token.startsWith("</")
@@ -680,17 +851,20 @@ export function prettyXml(fragment: string, maxLines = 18): string {
     )
     if (!closing && !selfClosing) depth++
   }
-  if (lines.length <= maxLines) return lines.join("\n")
-  const hidden = lines.length - maxLines + 1
-  return [...lines.slice(0, maxLines - 1), `… ${hidden} more lines`].join("\n")
+  if (lines.length <= maxLines) return { lines, hiddenLines: 0 }
+  // One line of the budget goes to saying how many were left out.
+  return {
+    lines: lines.slice(0, maxLines - 1),
+    hiddenLines: lines.length - maxLines + 1,
+  }
 }
 
-function headerExcerpt(xml: string): string {
+function headerExcerpt(xml: string): PrettyXml {
   const tag = /<Ableton [^>]*>/.exec(xml)?.[0] ?? ""
   const attributes = tag.match(/[\w:-]+="[^"]*"/g) ?? []
-  return ["<Ableton", ...attributes.map((attribute) => `  ${attribute}`)].join(
-    "\n"
-  ) + ">"
+  const lines = ["<Ableton", ...attributes.map((attribute) => `  ${attribute}`)]
+  const last = lines.pop() ?? ""
+  return { lines: [...lines, `${last}>`], hiddenLines: 0 }
 }
 
 function countTags(xml: string): Map<string, number> {
@@ -739,42 +913,17 @@ export function outputName(fileName: string, converted: boolean): string {
 
 function toolChanges(xml: string, operation: Operation): readonly Fact[] {
   switch (operation.tool) {
-    case "pointeeIds": {
-      const report = inspectPointeeIds(xml)
-      return [
-        { label: "Automation targets", value: String(report.targets) },
-        { label: "Duplicated Ids", value: String(report.duplicatedIds.length) },
-        { label: "Extra occurrences", value: String(report.extraOccurrences) },
-      ]
-    }
-    case "rewarp": {
-      const report = inspectRewarp(xml)
-      return [
-        { label: "Clips warped at", value: bpmSpread(report.byBpm) },
-        {
-          label: "Grid BPM",
-          value: report.gridBpm === null ? "none" : formatNumber(report.gridBpm),
-        },
-        {
-          label: "Master BPM",
-          value:
-            report.masterBpm === null ? "none" : formatNumber(report.masterBpm),
-        },
-      ]
-    }
-    case "followActions": {
-      const report = inspectFollowActions(xml)
-      return [
-        { label: "Need enabling", value: String(report.needEnable) },
-        { label: "Need unlinking", value: String(report.needUnlink) },
-        { label: "Need retiming", value: String(report.needRetime) },
-      ]
-    }
+    case "pointeeIds":
+      return pointeeFacts(inspectPointeeIds(xml))
+    case "rewarp":
+      return rewarpFacts(inspectRewarp(xml))
+    case "followActions":
+      return followFacts(inspectFollowActions(xml))
     case "mirrorTrack": {
       const preview = previewMirror(xml, operation.base, operation.target)
       return [
-        { label: "Scenes both tracks share", value: String(preview.shared) },
-        { label: "Scenes that differ", value: String(preview.differing) },
+        { label: { key: "sharedScenes" }, value: preview.shared },
+        { label: { key: "differingScenes" }, value: preview.differing },
       ]
     }
     case "relinkSamples": {
@@ -782,10 +931,13 @@ function toolChanges(xml: string, operation: Operation): readonly Fact[] {
         AUDIO_FILE.test(ref.name)
       )
       return [
-        { label: "First audio reference", value: refs[0]?.path ?? "none" },
+        { label: { key: "firstAudioRef" }, value: refs[0]?.path ?? null },
         {
-          label: "References with an alias record",
-          value: `${refs.filter((ref) => ref.hasAlias).length} of ${refs.length}`,
+          label: { key: "refsWithAlias" },
+          value: {
+            part: refs.filter((ref) => ref.hasAlias).length,
+            total: refs.length,
+          },
         },
       ]
     }
@@ -799,14 +951,14 @@ function zipChanges(
   return before.map((fact, index) => ({
     label: fact.label,
     before: fact.value,
-    after: after[index]?.value ?? "",
+    after: after[index]?.value ?? null,
   }))
 }
 
 export class Session {
   readonly fileName: string
   readonly sizeBytes: number
-  readonly synthetic: boolean
+  readonly origin: Origin
   private readonly original: string
   private current: string
   private history: string[] = []
@@ -817,11 +969,11 @@ export class Session {
     fileName: string,
     xml: string,
     sizeBytes: number,
-    synthetic = false
+    origin: Origin = "file"
   ) {
     this.fileName = fileName
     this.sizeBytes = sizeBytes
-    this.synthetic = synthetic
+    this.origin = origin
     this.original = xml
     this.current = xml
   }
@@ -835,7 +987,7 @@ export class Session {
     return this.steps.some((step) => step.kind === "convert")
   }
 
-  state(phase?: (label: string) => void): SessionState {
+  state(phase?: (phase: Phase) => void): SessionState {
     this.cached ??= inspect(
       this.current,
       { fileName: this.fileName, sizeBytes: this.sizeBytes },
@@ -844,23 +996,16 @@ export class Session {
     const inspection = this.cached
     // A converted file that fails validation is one Live 10 refuses, or opens
     // and then dies on. Handing it over would be the one unrecoverable mistake.
-    const blocked: SessionState["output"]["blocked"] =
+    const blocked: OutputBlocked | null =
       this.steps.length === 0
-        ? { reason: "unchanged", message: "Nothing has been changed yet." }
+        ? { reason: "unchanged" }
         : this.converted && inspection.problems.length > 0
-          ? {
-              reason: "invalid",
-              message: `The converted set has ${inspection.problems.length} validation problem(s). Live 10 would refuse it or crash loading it, so it is not offered for download.`,
-            }
-          : this.synthetic
-            ? {
-                reason: "synthetic",
-                message:
-                  "The sample is a skeleton written for this page, not a complete set, so its result is not offered as a file. Open your own .als to download one.",
-              }
+          ? { reason: "invalid", problems: inspection.problems.length }
+          : this.origin === "damaged"
+            ? { reason: "damaged" }
             : null
     return {
-      synthetic: this.synthetic,
+      origin: this.origin,
       inspection,
       steps: this.steps,
       canUndo: this.history.length > 0,
@@ -901,22 +1046,19 @@ export class Session {
   applyTool(operation: Operation): ActionResult {
     const version = detectVersion(this.current)
     if (!supportsTool(operation.tool, version)) {
-      return {
-        ok: false,
-        error: `This tool does not run on Live ${version.major ?? "?"} files.`,
-      }
+      return { ok: false, refusal: unsupportedVersion(version) }
     }
     const before = toolChanges(this.current, operation)
     const outcome = runTool(this.current, operation)
-    if (!outcome.ok) return { ok: false, error: outcome.error }
+    if (!outcome.ok) return { ok: false, refusal: outcome.refusal }
     if (outcome.changed === 0 || outcome.xml === this.current) {
-      return { ok: false, error: "Nothing to change: the set already agrees." }
+      return { ok: false, refusal: { code: "nothing_to_change", values: {} } }
     }
     this.commit(outcome.xml, {
       kind: "tool",
       tool: operation.tool,
-      summary: outcome.summary,
       changed: outcome.changed,
+      skipped: outcome.skipped,
       changes: zipChanges(before, toolChanges(outcome.xml, operation)),
     })
     return { ok: true }
@@ -927,13 +1069,12 @@ export class Session {
     const version = detectVersion(source)
     const major = version.major ?? 0
     if (major <= 10) {
-      return { ok: false, error: "This set is already in the Live 10 format." }
+      return { ok: false, refusal: { code: "already_v10", values: {} } }
     }
     if (major === 11) {
       return {
         ok: false,
-        error:
-          "Live 11 sets have never been measured against a real file, so this page does not convert them.",
+        refusal: { code: "unverified_version", values: { version: major } },
       }
     }
 
@@ -944,8 +1085,12 @@ export class Session {
       // field (measured), so the library's deliberately synthetic constant
       // goes in. The path, which Live does use, is already in the document.
       fileCreatedAt: () => SYNTHETIC_CREATION_TIME,
+      // A browser cannot tell how the visitor's disk is formatted. This value
+      // made the alias records resolve on exFAT, HFS+ and APFS alike in
+      // Live 10.1.43; the library's default works on exFAT only.
+      volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
     })
-    if (!result.ok) return { ok: false, error: result.error }
+    if (!result.ok) return { ok: false, refusal: libraryError(result.error) }
 
     const beforeDocument = parseAlsDocument(source)
     const afterDocument = parseAlsDocument(result.xml)
@@ -958,12 +1103,12 @@ export class Session {
 
     const changes: Change[] = [
       {
-        label: "Saved by",
+        label: { key: "savedBy" },
         before: version.creator,
         after: detectVersion(result.xml).creator,
       },
       {
-        label: "Schema",
+        label: { key: "schema" },
         before: version.minorVersion,
         after: detectVersion(result.xml).minorVersion,
       },
@@ -976,7 +1121,7 @@ export class Session {
     const sceneAfter = afterDocument.scenes[sceneIndex]
     if (sceneBefore && sceneAfter) {
       changes.push({
-        label: `Scene ${sceneIndex + 1} name`,
+        label: { key: "sceneName", scene: sceneIndex + 1 },
         before: sceneBefore.rawName,
         after: sceneAfter.rawName,
       })
@@ -988,20 +1133,23 @@ export class Session {
     const trackAfter = afterDocument.tracks[colored]
     if (trackBefore && trackAfter) {
       changes.push({
-        label: `Colour of track ${trackBefore.name}`,
+        label: { key: "trackColor", track: trackBefore.name },
         before: `Color ${trackBefore.colorIndex}`,
         after: `ColorIndex ${trackAfter.colorIndex}`,
       })
     }
     changes.push({
-      label: "Audio references with an alias record",
-      before: `0 of ${afterRefs.length}`,
-      after: `${afterRefs.filter((ref) => ref.hasAlias).length} of ${afterRefs.length}`,
+      label: { key: "audioRefsWithAlias" },
+      before: { part: 0, total: afterRefs.length },
+      after: {
+        part: afterRefs.filter((ref) => ref.hasAlias).length,
+        total: afterRefs.length,
+      },
     })
 
     const excerpts: Excerpt[] = [
       {
-        title: "Document header",
+        title: { key: "header" },
         before: headerExcerpt(source),
         after: headerExcerpt(result.xml),
       },
@@ -1012,7 +1160,7 @@ export class Session {
     const rangeAfter = scenesAfter[sceneIndex]
     if (rangeBefore && rangeAfter) {
       excerpts.push({
-        title: `Scene ${sceneIndex + 1}`,
+        title: { key: "scene", scene: sceneIndex + 1 },
         before: prettyXml(source.slice(rangeBefore.start, rangeBefore.end)),
         after: prettyXml(result.xml.slice(rangeAfter.start, rangeAfter.end)),
       })
@@ -1021,7 +1169,7 @@ export class Session {
     const refAfter = allAfterRefs[firstAudio]
     if (refBefore && refAfter && beforeRefs.length === allAfterRefs.length) {
       excerpts.push({
-        title: "First audio reference",
+        title: { key: "firstAudioRef" },
         before: prettyXml(source.slice(refBefore.start, refBefore.end)),
         after: prettyXml(result.xml.slice(refAfter.start, refAfter.end), 22),
       })
@@ -1053,44 +1201,107 @@ export class Session {
   }
 }
 
-function runTool(xml: string, operation: Operation): ToolOutcome {
+/** A repair's result, without the library's English summary. */
+type Outcome =
+  | {
+      readonly ok: true
+      readonly xml: string
+      readonly changed: number
+      readonly skipped: number
+    }
+  | { readonly ok: false; readonly refusal: Refusal }
+
+function libraryError(detail: string): Refusal {
+  return { code: "library_error", values: { detail } }
+}
+
+function fromLibrary(outcome: ToolOutcome): Outcome {
+  return outcome.ok
+    ? { ok: true, xml: outcome.xml, changed: outcome.changed, skipped: 0 }
+    : { ok: false, refusal: libraryError(outcome.error) }
+}
+
+const refuse = (refusal: Refusal): Outcome => ({ ok: false, refusal })
+
+// The library says why it refuses in English prose only. Each refusal it is
+// known to make is checked here first, from its own inspection functions, so
+// the page gets a code it can word in any language.
+function runTool(xml: string, operation: Operation): Outcome {
   switch (operation.tool) {
-    case "pointeeIds":
-      return fixPointeeIds(xml)
-    case "followActions":
-      return syncFollowActions(xml)
-    case "rewarp":
-      return rewarpClips(xml, operation.bpm)
-    case "mirrorTrack":
-      return mirrorTrackGeometry(xml, operation.base, operation.target)
+    case "pointeeIds": {
+      const report = inspectPointeeIds(xml)
+      if (
+        report.duplicatedIds.length > 0 &&
+        report.collidingReferences.length > 0
+      ) {
+        return refuse({
+          code: "colliding_pointee_ids",
+          values: { ids: report.collidingReferences.join(", ") },
+        })
+      }
+      return fromLibrary(fixPointeeIds(xml))
+    }
+    case "followActions": {
+      const report = inspectFollowActions(xml)
+      if (report.conflicting.length > 0) {
+        return refuse({
+          code: "mixed_clip_durations",
+          values: { count: report.conflicting.length },
+        })
+      }
+      return fromLibrary(syncFollowActions(xml))
+    }
+    case "rewarp": {
+      if (!Number.isFinite(operation.bpm) || operation.bpm <= 0) {
+        return refuse({ code: "invalid_bpm", values: {} })
+      }
+      if (inspectRewarp(xml).gridBpm === null) {
+        return refuse({ code: "no_warped_clips", values: {} })
+      }
+      return fromLibrary(rewarpClips(xml, operation.bpm))
+    }
+    case "mirrorTrack": {
+      const { base, target } = operation
+      if (base === target) return refuse({ code: "same_track", values: {} })
+      const preview = previewMirror(xml, base, target)
+      if (preview.shared + preview.baseOnly === 0) {
+        return refuse({ code: "track_without_clips", values: { track: base } })
+      }
+      if (preview.shared + preview.targetOnly === 0) {
+        return refuse({
+          code: "track_without_clips",
+          values: { track: target },
+        })
+      }
+      return fromLibrary(mirrorTrackGeometry(xml, base, target))
+    }
     case "relinkSamples": {
       const root = operation.libraryRoot.trim()
       if (!root.startsWith("/")) {
-        return {
-          ok: false,
-          error: "Enter the absolute path of the library folder, starting with /",
-        }
+        return refuse({ code: "relative_library_root", values: {} })
       }
       const report = relinkFileRefs(xml, root, {
         fileCreatedAt: () => SYNTHETIC_CREATION_TIME,
+        volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
       })
       if (report.relinked === 0) {
-        return {
-          ok: false,
-          error:
-            report.unresolved.length > 0
-              ? `No reference could be re-rooted. The document does not say where ${report.unresolved.length} file(s) sit inside a folder named "${root.split("/").filter(Boolean).pop() ?? ""}".`
-              : "Every reference already points inside that folder.",
-        }
+        return refuse(
+          report.unresolved.length > 0
+            ? {
+                code: "relink_unresolved",
+                values: {
+                  count: report.unresolved.length,
+                  folder: root.split("/").filter(Boolean).pop() ?? "",
+                },
+              }
+            : { code: "relink_already_there", values: {} }
+        )
       }
       return {
         ok: true,
         xml: report.xml,
         changed: report.relinked,
-        summary:
-          report.unresolved.length > 0
-            ? `${report.relinked} reference(s) re-rooted at ${root}; ${report.unresolved.length} left as they were`
-            : `${report.relinked} reference(s) re-rooted at ${root}`,
+        skipped: report.unresolved.length,
       }
     }
   }

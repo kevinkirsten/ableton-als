@@ -2,6 +2,10 @@
 // scene names, track names and file paths come straight out of a file a
 // stranger handed us.
 
+import { formatter, type Formatter } from "../i18n/format.js"
+import { locale } from "../i18n/index.js"
+import { LINKS } from "../i18n/links.js"
+
 export type Child = Node | string | number | null | undefined | false
 
 type Listener = (event: Event) => void
@@ -105,21 +109,74 @@ export function valuesList(
   )
 }
 
-const plurals = new Intl.PluralRules("en")
+// ---------------------------------------------------------------------------
+// Numbers and plurals, in the active language
+// ---------------------------------------------------------------------------
 
+const format = (): Formatter => formatter(locale())
+
+/** "1 problem", "3 problems": the word is picked by the language's own rule. */
 export function count(value: number, one: string, other: string): string {
-  const word = plurals.select(value) === "one" ? one : other
-  return `${value.toLocaleString("en")} ${word}`
+  return format().count(value, one, other)
 }
 
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes}\u00a0B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}\u00a0KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)}\u00a0MB`
+  return format().bytes(bytes)
 }
 
-export function formatNumber(value: number): string {
-  return Number.isInteger(value)
-    ? value.toLocaleString("en")
-    : String(Number(value.toFixed(2)))
+/** A count or a BPM as the active language writes it. */
+export function formatNumber(value: number, maxFraction = 2): string {
+  return format().number(value, maxFraction)
+}
+
+// ---------------------------------------------------------------------------
+// Catalog text that carries a little structure
+// ---------------------------------------------------------------------------
+
+const RICH =
+  /`([^`]+)`|\*\*([^*]+)\*\*|~([^~]+)~|\[([^\]]+)\]\(([a-z]+)\)/g
+
+/**
+ * Catalog text marked RICH, as DOM nodes: `code`, **strong**,
+ * ~kept as written~ and [link text](target). Built node by node, never
+ * through innerHTML. Only catalog text goes through here, never text from a
+ * file.
+ */
+export function rich(text: string): (Node | string)[] {
+  const nodes: (Node | string)[] = []
+  let cursor = 0
+  RICH.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = RICH.exec(text)) !== null) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index))
+    const [, code, strong, kept, linkText, target] = match
+    if (code !== undefined) {
+      nodes.push(h("code", { translate: "no" }, code))
+    } else if (strong !== undefined) {
+      nodes.push(h("strong", null, strong))
+    } else if (kept !== undefined) {
+      nodes.push(h("span", { translate: "no" }, kept))
+    } else if (linkText !== undefined && target !== undefined) {
+      const href = LINKS[target]
+      nodes.push(href === undefined ? linkText : h("a", { href }, linkText))
+    }
+    cursor = match.index + match[0].length
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
+// A private-use character: it cannot occur in a catalog or in a file name.
+const SLOT = "\uE000"
+
+/**
+ * A catalog sentence with a node in the place of its one argument, wherever
+ * the language puts it: "Saved as <name>, never over your original."
+ */
+export function around(
+  sentence: (slot: string) => string,
+  node: Child
+): readonly Child[] {
+  const [before = "", after = ""] = sentence(SLOT).split(SLOT)
+  return [before, node, after]
 }

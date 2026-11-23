@@ -1053,6 +1053,56 @@ main {
   font-family: var(--mono);
   font-size: 15px;
 }
+/* The native arrow sits a few pixels from the edge in every browser. Draw
+   our own, 16px in, with two gradients in the ink colour: no image file and
+   no data: URI, which the page's security policy would refuse. */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink) 50%),
+    linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position:
+    calc(100% - 21px) 50%,
+    calc(100% - 16px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+.select-compact {
+  width: auto;
+  min-height: 36px;
+  padding-left: var(--s2);
+  padding-right: 32px;
+  font-size: 0.875rem;
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+}
+@media (pointer: coarse) {
+  .select-compact {
+    min-height: 44px;
+  }
+}
+.brand {
+  white-space: nowrap;
+}
+@media (max-width: 420px) {
+  .brand-note,
+  .top-nav a[href*="npmjs.com"] {
+    display: none;
+  }
+  .top-nav {
+    gap: var(--s3);
+  }
+}
+/* Narrow screens: a table scrolls sideways inside its box rather than
+   squeezing a column of prose down to one word per line. */
+@media (max-width: 640px) {
+  .table-scroll .table {
+    min-width: 34rem;
+  }
+}
 .input:focus-visible,
 .select:focus-visible {
   outline: 2px solid var(--ink);

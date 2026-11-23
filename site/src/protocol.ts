@@ -6,6 +6,8 @@ import type {
   Inspection,
   OpenError,
   Operation,
+  Phase,
+  Refusal,
   SessionState,
 } from "./engine.js"
 
@@ -27,14 +29,17 @@ export type Request =
   | { readonly type: "close" }
 
 export type Reply =
-  /** What the worker is doing right now. Honest labels, never a percentage. */
-  | { readonly type: "phase"; readonly label: string }
+  /**
+   * What the worker is doing right now: an honest step, never a percentage.
+   * A code, because the worker does not know the visitor's language.
+   */
+  | { readonly type: "phase"; readonly phase: Phase }
   | { readonly type: "state"; readonly state: SessionState }
   | { readonly type: "closed" }
   | { readonly type: "preview"; readonly inspection: Inspection }
   | { readonly type: "openError"; readonly code: OpenError | "crashed" }
   /** An action that was refused. The document is unchanged. */
-  | { readonly type: "refused"; readonly message: string }
+  | { readonly type: "refused"; readonly refusal: Refusal }
   | { readonly type: "mirrorPreview"; readonly preview: MirrorPreview }
   | {
       readonly type: "file"
