@@ -138,6 +138,20 @@ describe("the library's messages, in each language", () => {
   })
 })
 
+describe("plurals", () => {
+  it("puts zero in the plural in every language, Portuguese included", async () => {
+    const { formatter } = await import("../../site/src/i18n/format.js")
+    expect(formatter("pt-BR").count(0, "problema", "problemas")).toBe(
+      "0 problemas"
+    )
+    expect(formatter("pt-BR").count(1, "problema", "problemas")).toBe(
+      "1 problema"
+    )
+    expect(formatter("es").count(0, "problema", "problemas")).toBe("0 problemas")
+    expect(formatter("en").count(1, "problem", "problems")).toBe("1 problem")
+  })
+})
+
 describe("detectLocale", () => {
   it("honours a saved choice first", () => {
     expect(detectLocale(["pt-BR"], "es")).toBe("es")

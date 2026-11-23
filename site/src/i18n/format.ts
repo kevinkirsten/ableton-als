@@ -21,8 +21,10 @@ export function formatter(locale: string): Formatter {
   const plurals = new Intl.PluralRules(locale)
   const number = (value: number, maxFraction = 2): string =>
     value.toLocaleString(locale, { maximumFractionDigits: maxFraction })
+  // Zero takes the plural in all three languages. CLDR files Portuguese 0
+  // under `one`, which would print "0 problema".
   const pick = (value: number, one: string, other: string): string =>
-    plurals.select(value) === "one" ? one : other
+    value !== 0 && plurals.select(value) === "one" ? one : other
 
   const made: Formatter = {
     number,
