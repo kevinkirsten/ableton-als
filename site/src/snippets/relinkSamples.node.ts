@@ -3,6 +3,7 @@ import {
   decodeAls,
   encodeAls,
   fileCreatedAt,
+  PORTABLE_VOLUME_ATTRIBUTES,
   relinkFileRefs,
 } from "ableton-als/node"
 
@@ -15,7 +16,10 @@ const xml = decodeAls(await readFile("Song.als"))
 const report = relinkFileRefs(
   xml,
   "/Volumes/Demo SSD/Library",
-  { fileCreatedAt }
+  {
+    fileCreatedAt,
+    volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
+  }
 )
 
 console.log(report.relinked, "relinked")

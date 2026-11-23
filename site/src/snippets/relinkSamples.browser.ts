@@ -2,6 +2,7 @@ import {
   decodeAls,
   encodeAls,
   fileCreatedAt,
+  PORTABLE_VOLUME_ATTRIBUTES,
   relinkFileRefs,
 } from "ableton-als/web"
 
@@ -18,7 +19,10 @@ export async function repair(
   const report = relinkFileRefs(
     xml,
     "/Volumes/Demo SSD/Library",
-    { fileCreatedAt }
+    {
+      fileCreatedAt,
+      volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
+    }
   )
 
   console.log(report.relinked, "relinked")

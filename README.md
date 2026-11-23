@@ -10,7 +10,7 @@
 
 Its headline feature: **convert a Live 12 set into a file Live 10 can open.** Ableton offers no downgrade path — a set saved in a newer Live simply refuses to open in an older one. This library builds the file the older Live expects.
 
-**[Try it in your browser](https://kevinkirsten.github.io/ableton-als/)**: drop a set to inspect it, validate it, repair it and convert it from Live 12 to Live 10. Nothing to install, and the file never leaves your machine.
+**[Try it in your browser](https://kevinkirsten.github.io/ableton-als/)**: drop a set to inspect it, validate it, repair it and convert it from Live 12 to Live 10. Nothing to install, the file never leaves your machine, and the page speaks English, Portuguese and Spanish.
 
 > ## Status: 0.x, in production use
 >
@@ -23,7 +23,7 @@ Its headline feature: **convert a Live 12 set into a file Live 10 can open.** Ab
 > | Working today | `.als` parsing, surgical editing, validation, the Live 12 → 10 porter, alias record generation, sample relinking, repair tools, Node and web adapters, and a [browser demo](https://kevinkirsten.github.io/ableton-als/) |
 > | Next | `docs/FORMAT.md` |
 >
-> What is here is verified rather than asserted: 194 unit tests on the library,
+> What is here is verified rather than asserted: over 200 unit tests on the library,
 > and the conversion is checked against sets Ableton itself wrote. Most recently
 > 5,016 alias records were reproduced byte for byte, and a converted 561-scene
 > set opened in real Live 10 with zero missing files.
@@ -47,12 +47,17 @@ Convert a Live 12 set to Live 10 in Node:
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises"
-import { convertAlsToV10 } from "ableton-als/node"
+import {
+  convertAlsToV10,
+  PORTABLE_VOLUME_ATTRIBUTES,
+} from "ableton-als/node"
 
 const result = convertAlsToV10({
   fileName: "Song.als",
   bytes: await readFile("Song.als"),
   libraryRoot: "/Volumes/Demo SSD/Library",
+  // Alias records that resolve on exFAT, HFS+ and APFS.
+  volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
 })
 if (!result.ok) throw new Error(result.error)
 
@@ -79,6 +84,7 @@ import {
   downgradeToV10,
   encodeAls,
   fileCreatedAt,
+  PORTABLE_VOLUME_ATTRIBUTES,
   validateGeneratedSet,
 } from "ableton-als/web"
 
@@ -90,8 +96,10 @@ export async function convert(
 
   const result = downgradeToV10(xml, {
     libraryRoot: "/Volumes/Demo SSD/Library",
-    // Builds the alias records Live 10 finds audio by.
+    // Builds the alias records Live 10 finds audio by,
+    // in a form that resolves on exFAT, HFS+ and APFS.
     fileCreatedAt,
+    volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
   })
   if (!result.ok) throw new Error(result.error)
 
@@ -123,7 +131,9 @@ And it is genuinely lossless there: the only filesystem fact the conversion appe
 
 ### The demo
 
-[kevinkirsten.github.io/ableton-als](https://kevinkirsten.github.io/ableton-als/) is that claim made checkable. It is a static page whose Content Security Policy carries `connect-src 'none'`, so the browser itself refuses any upload, and it does all its work in a Web Worker: inspect a set, validate it, convert it and run the repair tools, each one next to the code that does the same thing.
+[kevinkirsten.github.io/ableton-als](https://kevinkirsten.github.io/ableton-als/) is that claim made checkable. It is a static page whose Content Security Policy carries `connect-src 'none'`, so the browser itself refuses any upload, and it does all its work in a Web Worker: inspect a set, validate it, convert it and run the repair tools, each one next to the code that does the same thing. It is in English, Brazilian Portuguese and Spanish.
+
+Its sample set was saved by Live 12 for the page, so what the page makes from it can be downloaded and opened in Live; [`site/sample/README.md`](./site/sample/README.md) says how it was authored. The page's conversion of it opened in Live 10.1.43 with every clip loaded.
 
 Its source is in [`site/`](./site). It is written without a framework, on purpose, so it doubles as the reference example.
 
@@ -152,7 +162,7 @@ Measured gaps, stated plainly, because a library about byte-fidelity should not 
 - **A long folder name is not reproduced exactly.** Live shortens any name over 31 characters to 30. For a *file* the marker is the constant `#FFFFFFFF`, which this library reproduces. For a *directory* the marker embeds a filesystem CNID (`…(Shorter#1CE2`) that cannot be computed — it is volume-specific, changes when folders move, and is not available in a browser at all. This library writes the full folder name instead. Sets built that way open in Live 10 with every clip loaded, and the field is in the group Live demonstrably ignores, but it is a real difference from what Live writes.
 - **`fileType` and `creator` come from the file's `com.apple.FinderInfo` xattr**, and are zero when the file has none. Reading an xattr is I/O, so they are optional inputs; the default is the disabled value that almost every audio file carries. A caller that wants exactness supplies them.
 - **Alias records are only generated for paths under `/Volumes/`.** The boot-volume variant was never measured, and guessing would produce a file that opens and finds nothing — the exact defect this code exists to prevent. It declines instead.
-- **`volumeAttributes` and the filesystem id default to values sampled from one external SSD.** No second volume has been measured.
+- **An alias record resolves only on the kind of volume its attributes describe.** Measured in Live 10.1.43 on three disk images holding the same files under the same paths: with the default volume attributes (`0x0a00`, what Live 10 wrote for an exFAT disk) the records resolve on exFAT and on nothing else, and Live opens the set with every clip missing on HFS+ and APFS. With `PORTABLE_VOLUME_ATTRIBUTES` (`0x0d02`) they resolved on all three. The default is kept for byte fidelity with Live on exFAT; pass the portable value when you cannot tell how the disk is formatted, as the browser demo does. It has been tried on disk images, not on a physical HFS+ or APFS disk.
 - **Scene colours are inferred, not measured.** Track and clip colours are measured across the full 70-colour palette.
 
 ### Everything here was measured on macOS

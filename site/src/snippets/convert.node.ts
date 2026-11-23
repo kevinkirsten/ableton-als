@@ -1,10 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises"
-import { convertAlsToV10 } from "ableton-als/node"
+import {
+  convertAlsToV10,
+  PORTABLE_VOLUME_ATTRIBUTES,
+} from "ableton-als/node"
 
 const result = convertAlsToV10({
   fileName: "Song.als",
   bytes: await readFile("Song.als"),
   libraryRoot: "/Volumes/Demo SSD/Library",
+  // Alias records that resolve on exFAT, HFS+ and APFS.
+  volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
 })
 if (!result.ok) throw new Error(result.error)
 

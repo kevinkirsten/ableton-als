@@ -3,6 +3,7 @@ import {
   downgradeToV10,
   encodeAls,
   fileCreatedAt,
+  PORTABLE_VOLUME_ATTRIBUTES,
   validateGeneratedSet,
 } from "ableton-als/web"
 
@@ -14,8 +15,10 @@ export async function convert(
 
   const result = downgradeToV10(xml, {
     libraryRoot: "/Volumes/Demo SSD/Library",
-    // Builds the alias records Live 10 finds audio by.
+    // Builds the alias records Live 10 finds audio by,
+    // in a form that resolves on exFAT, HFS+ and APFS.
     fileCreatedAt,
+    volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
   })
   if (!result.ok) throw new Error(result.error)
 
