@@ -677,7 +677,7 @@ function conversionResult(
         null,
         audioRefs === 0
           ? "This set references no audio files."
-          : `An alias record was written for ${withRecord} of ${count(audioRefs, "audio reference", "audio references")}. Live 10 finds audio by that record, not by the path next to it.`
+          : `An alias record was written for ${withRecord.toLocaleString("en")} of ${count(audioRefs, "audio reference", "audio references")}. Live 10 finds audio by that record, not by the path next to it.`
       ),
       offVolume > 0
         ? h(
