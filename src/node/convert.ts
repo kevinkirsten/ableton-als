@@ -64,6 +64,13 @@ export function convertAlsToV10(input: {
    * points nowhere.
    */
   readonly fileCreatedAt?: (absolutePath: string) => number | null
+  /**
+   * Volume attributes for the alias records. Leave it out for audio on an
+   * exFAT disk. For a Mac-formatted disk (APFS, HFS+) pass
+   * `PORTABLE_VOLUME_ATTRIBUTES`, or Live 10 opens the set with every clip
+   * missing.
+   */
+  readonly volumeAttributes?: number | undefined
 }): ConversionResult {
   if (input.bytes.length === 0) return { ok: false, error: "empty_file" }
   if (input.bytes.length > MAX_UPLOAD_BYTES)
@@ -78,6 +85,7 @@ export function convertAlsToV10(input: {
   const result = downgradeToV10(xml, {
     libraryRoot: input.libraryRoot,
     fileCreatedAt: input.fileCreatedAt ?? fileCreatedAtFromDisk,
+    volumeAttributes: input.volumeAttributes,
   })
   if (!result.ok) return { ok: false, error: result.error }
 

@@ -124,6 +124,21 @@ describe("relinkFileRefs", () => {
     expect(report.xml).toContain('<FileRef Id="4">')
   })
 
+  it("passes the volume attributes through to the alias record", () => {
+    const xml = v10Ref({ relative: ["AUDIO", "Song"], name: "stem.wav" })
+    const dataOf = (attributes?: number): string =>
+      /<Data>([\s\S]*?)<\/Data>/
+        .exec(
+          relinkFileRefs(xml, ROOT, {
+            fileCreatedAt: () => 3_061_152_000,
+            volumeAttributes: attributes,
+          }).xml
+        )![1]!
+        .replace(/\s+/g, "")
+    expect(dataOf().slice(268, 276)).toBe("00000A00")
+    expect(dataOf(0x0d02).slice(268, 276)).toBe("00000D02")
+  })
+
   it("writes the alias record when the caller can date the file", () => {
     const xml = v10Ref({ relative: ["AUDIO TRACKS"], name: "x.wav" })
     const report = relinkFileRefs(xml, ROOT, {

@@ -7,6 +7,7 @@ export {
   hfsShortName,
   macCreationTime,
   MAC_EPOCH_OFFSET,
+  PORTABLE_VOLUME_ATTRIBUTES,
   SYNTHETIC_CREATION_TIME,
   type AliasInput,
   type AliasResult,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parseAlsDocument } from "../../src/core/document.js"
 import {
+  convertFileRefs,
   downgradeToV10,
   majorVersionOf,
   toV10Chance,
@@ -607,5 +608,39 @@ describe("document skeleton — bisected with 5 variants in real Live 10", () =>
     const master = /<MasterTrack>[\s\S]*?<\/MasterTrack>/.exec(xml)?.[0] ?? ""
     expect(master).toContain('<EffectiveName Value="Master" />')
     expect(xml).not.toContain('<EffectiveName Value="0-Main" />')
+  })
+})
+
+describe("convertFileRefs and the alias volume attributes", () => {
+  // The v12 reference shape as Live 12.4.3 writes it, values replaced.
+  const ref = `<FileRef>
+    <RelativePathType Value="1" />
+    <RelativePath Value="../Drums/drums_stem.wav" />
+    <Path Value="/Volumes/Demo SSD/Library/Drums/drums_stem.wav" />
+    <Type Value="2" />
+    <LivePackName Value="" />
+    <LivePackId Value="" />
+    <OriginalFileSize Value="705678" />
+    <OriginalCrc Value="38780" />
+    <SourceHint Value="" />
+  </FileRef>`
+
+  const attributesIn = (attributes?: number): string => {
+    const { edits } = convertFileRefs(
+      ref,
+      "/Volumes/Demo SSD/Library",
+      () => 3_061_152_000,
+      attributes
+    )
+    const data = /<Data>([\s\S]*?)<\/Data>/.exec(edits[0]!.replacement)![1]!
+    return data.replace(/\s+/g, "").slice(268, 276)
+  }
+
+  it("writes the exFAT value Live 10 wrote unless told otherwise", () => {
+    expect(attributesIn()).toBe("00000A00")
+  })
+
+  it("writes the attributes the caller asks for", () => {
+    expect(attributesIn(0x0d02)).toBe("00000D02")
   })
 })

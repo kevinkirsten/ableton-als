@@ -63,6 +63,31 @@ export function macCreationTime(
  */
 export const SYNTHETIC_CREATION_TIME = 3_061_152_000
 
+/**
+ * Volume attributes that made the record resolve on every volume it was tried
+ * on: exFAT, HFS+ and APFS.
+ *
+ * The default (`0x0a00`) is what Live 10 itself wrote for an exFAT external
+ * disk, and a record carrying it reproduces Live's bytes there. But the same
+ * record on a Mac-formatted volume does not resolve: Live 10 opens the set
+ * with every clip missing, although the files sit exactly where the record
+ * says. Measured in Live 10.1.43 on three disk images holding the same ten
+ * files under the same paths:
+ *
+ * | volume attributes | exFAT | HFS+ | APFS |
+ * |---|---|---|---|
+ * | `0x0a00` (default) | all found | none found | none found |
+ * | `0x0d02` (this) | all found | all found | all found |
+ *
+ * `0x0d02` is the value Live 10 wrote on its own for a file on the HFS+
+ * image. It has not been tried on a physical exFAT disk, only on an exFAT
+ * image, which is why it is offered here and not made the default.
+ *
+ * A browser cannot tell what a volume is formatted as, so a caller there
+ * should pass this.
+ */
+export const PORTABLE_VOLUME_ATTRIBUTES = 0x00000d02
+
 export type AliasInput = {
   /** Absolute path to the file, starting at `/Volumes/<volume>/`. */
   readonly absolutePath: string
@@ -72,8 +97,8 @@ export type AliasInput = {
    * Volume attributes. The default is the value measured on one external SSD;
    * no second volume has ever been sampled.
    */
-  readonly volumeAttributes?: number
-  readonly filesystemId?: number
+  readonly volumeAttributes?: number | undefined
+  readonly filesystemId?: number | undefined
   /**
    * Bytes 0-3 of the file's `com.apple.FinderInfo` xattr, as a big-endian
    * number. Zero when the file has no such attribute. Defaults to the disabled

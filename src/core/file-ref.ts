@@ -35,13 +35,18 @@ function readValue(body: string, tag: string): string | null {
  */
 export function aliasData(
   path: string,
-  fileCreatedAt?: ((absolutePath: string) => number | null) | undefined
+  fileCreatedAt?: ((absolutePath: string) => number | null) | undefined,
+  volumeAttributes?: number | undefined
 ): string {
   if (!fileCreatedAt) return `<Data />`
   const absolute = path.startsWith("/") ? path : `/${path}`
   const createdAt = fileCreatedAt(absolute)
   if (createdAt === null || createdAt === undefined) return `<Data />`
-  const alias = buildAliasRecord({ absolutePath: absolute, createdAt })
+  const alias = buildAliasRecord({
+    absolutePath: absolute,
+    createdAt,
+    volumeAttributes,
+  })
   if (!alias.ok) return `<Data />`
   const lines = alias.hex.match(/.{1,80}/g) ?? []
   return `<Data>\n\t${lines.join("\n\t")}\n\t</Data>`
@@ -68,6 +73,8 @@ export function writeV10FileRef(input: {
   readonly fileSize: string
   readonly crc: string
   readonly fileCreatedAt?: ((absolutePath: string) => number | null) | undefined
+  /** See `PORTABLE_VOLUME_ATTRIBUTES`. Omitted: the exFAT value Live wrote. */
+  readonly volumeAttributes?: number | undefined
 }): string {
   const segments = input.absolutePath.split("/").filter(Boolean)
   const fileName = segments[segments.length - 1] ?? ""
@@ -93,7 +100,7 @@ export function writeV10FileRef(input: {
     `<RelativePath />`,
     `<Name Value="${escapeXml(fileName)}" />`,
     `<Type Value="${input.type}" />`,
-    aliasData(segments.join("/"), input.fileCreatedAt),
+    aliasData(segments.join("/"), input.fileCreatedAt, input.volumeAttributes),
     `<RefersToFolder Value="false" />`,
     `<SearchHint>`,
     list("PathHint", segments.slice(0, -1)),
@@ -125,6 +132,12 @@ export type RelinkOptions = {
   readonly fileCreatedAt?:
     | ((absolutePath: string) => number | null)
     | undefined
+  /**
+   * Volume attributes for the alias record. A record with the default only
+   * resolves on an exFAT volume; `PORTABLE_VOLUME_ATTRIBUTES` resolved on
+   * exFAT, HFS+ and APFS.
+   */
+  readonly volumeAttributes?: number | undefined
   /**
    * Last word on where the file really is, called for EVERY ref this function
    * rebuilds. It exists because the document can be stale: a folder renamed or
@@ -223,6 +236,7 @@ export function relinkFileRefs(
       fileSize: readValue(body, "FileSize") ?? "0",
       crc: readValue(body, "Crc") ?? "0",
       fileCreatedAt: options.fileCreatedAt,
+      volumeAttributes: options.volumeAttributes,
     })
     if (replacement === match[0]) continue
     edits.push({

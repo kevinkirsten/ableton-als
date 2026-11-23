@@ -97,6 +97,12 @@ export type DowngradeOptions = {
    * callback because reading the disk is an effect, and this module is pure.
    */
   readonly fileCreatedAt?: (absolutePath: string) => number | null
+  /**
+   * Volume attributes for the alias records. A record with the default only
+   * resolves on an exFAT volume (measured in Live 10.1.43);
+   * `PORTABLE_VOLUME_ATTRIBUTES` resolved on exFAT, HFS+ and APFS.
+   */
+  readonly volumeAttributes?: number | undefined
 }
 
 export function downgradeToV10(
@@ -139,7 +145,8 @@ export function downgradeToV10(
     const refs = convertFileRefs(
       xml,
       options.libraryRoot,
-      options.fileCreatedAt
+      options.fileCreatedAt,
+      options.volumeAttributes
     )
     edits.push(...refs.edits)
     warnings.push(...refs.warnings)
@@ -1144,7 +1151,8 @@ function greatestCommonDivisor(left: number, right: number): number {
 export function convertFileRefs(
   xml: string,
   libraryRoot: string,
-  fileCreatedAt?: (absolutePath: string) => number | null
+  fileCreatedAt?: (absolutePath: string) => number | null,
+  volumeAttributes?: number | undefined
 ): {
   readonly edits: readonly Edit[]
   readonly warnings: readonly DowngradeWarning[]
@@ -1200,6 +1208,7 @@ export function convertFileRefs(
         fileSize: readValue(body, "OriginalFileSize") ?? "0",
         crc: readValue(body, "OriginalCrc") ?? "0",
         fileCreatedAt,
+        volumeAttributes,
       }),
     })
   }

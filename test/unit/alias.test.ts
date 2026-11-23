@@ -4,6 +4,7 @@ import {
   hfsShortName,
   MAC_EPOCH_OFFSET,
   macCreationTime,
+  PORTABLE_VOLUME_ATTRIBUTES,
   SYNTHETIC_CREATION_TIME,
 } from "../../src/core/alias.js"
 
@@ -178,6 +179,45 @@ describe("buildAliasRecord", () => {
     const dateStart = 118 * 2
     expect(synthetic.hex.slice(0, dateStart)).toBe(real.hex.slice(0, dateStart))
     expect(synthetic.hex.slice(dateStart + 8)).toBe(real.hex.slice(dateStart + 8))
+  })
+})
+
+describe("volume attributes", () => {
+  // MEASURED in Live 10.1.43 on 2026-11-23, on three disk images holding the
+  // same ten files under the same paths. A record with the default attributes
+  // resolved on exFAT only (10 of 10 found; 0 of 10 on HFS+ and on APFS). One
+  // with 0x0d02, the value Live 10 itself wrote on the HFS+ image, resolved on
+  // all three. The field sits at byte 134 of the record.
+  const path = "/Volumes/Demo SSD/Library/Drums/drums_stem.wav"
+  const attributesOf = (hex: string): number =>
+    Number.parseInt(hex.slice(134 * 2, 138 * 2), 16)
+
+  it("defaults to the value Live 10 wrote for an exFAT disk", () => {
+    const record = buildAliasRecord({
+      absolutePath: path,
+      createdAt: SYNTHETIC_CREATION_TIME,
+    })
+    expect(record.ok && attributesOf(record.hex)).toBe(0x0a00)
+  })
+
+  it("takes the portable value, and changes nothing else in the record", () => {
+    const base = buildAliasRecord({
+      absolutePath: path,
+      createdAt: SYNTHETIC_CREATION_TIME,
+    })
+    const portable = buildAliasRecord({
+      absolutePath: path,
+      createdAt: SYNTHETIC_CREATION_TIME,
+      volumeAttributes: PORTABLE_VOLUME_ATTRIBUTES,
+    })
+    if (!base.ok || !portable.ok) throw new Error("expected two records")
+    expect(attributesOf(portable.hex)).toBe(0x0d02)
+    expect(portable.hex.length).toBe(base.hex.length)
+    const differing = [...base.hex].filter(
+      (character, index) => character !== portable.hex[index]
+    ).length
+    // 0x0a00 against 0x0d02: two hex digits.
+    expect(differing).toBe(2)
   })
 })
 
