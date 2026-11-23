@@ -104,6 +104,22 @@ const XML_ENTITIES: Record<string, string> = {
   "&apos;": "'",
 }
 
+/**
+ * Ableton writes an attribute in SINGLE quotes when its value holds a double
+ * quote (`Value='"death could not"'`). Every regex in this package assumes
+ * double quotes, so such a value is invisible until the quoting is made
+ * uniform. Internal: shared by the reader and the downgrade.
+ */
+export function normalizeSingleQuotedAttributes(xml: string): string {
+  // Most documents have none; skip the pass over tens of megabytes.
+  if (!xml.includes("='")) return xml
+  return xml.replace(
+    /([\w.:-]+)='([^']*)'/g,
+    (_, attribute: string, value: string) =>
+      `${attribute}="${value.replace(/"/g, "&quot;")}"`
+  )
+}
+
 export function unescapeXml(text: string): string {
   return text.replace(/&(?:amp|lt|gt|quot|apos|#\d+);/g, (entity) => {
     if (entity.startsWith("&#")) {
@@ -178,6 +194,14 @@ export function parseHeader(xml: string): AlsHeader | null {
 const SCENE_OPEN_RE = /<Scene Id="(\d+)"([^>]*)>/g
 
 export function parseScenes(xml: string): {
+  readonly schema: SceneSchemaVersion
+  readonly scenes: readonly AlsScene[]
+} {
+  return scenesOf(normalizeSingleQuotedAttributes(xml))
+}
+
+/** `parseScenes` over a document whose quoting is already uniform. */
+function scenesOf(xml: string): {
   readonly schema: SceneSchemaVersion
   readonly scenes: readonly AlsScene[]
 } {
@@ -272,6 +296,16 @@ function parseWarp(segment: string): {
   return { anchorSeconds: first!.sec, bpm, count: markers.length }
 }
 
+/** The last segment of a Live 12 `<Path>` (or `<RelativePath>`) value. */
+function fileNameFromPath(sampleRefBody: string): string | null {
+  const fileRef = readBlock(sampleRefBody, "FileRef")
+  if (!fileRef) return null
+  const path =
+    readString(fileRef.body, "Path") || readString(fileRef.body, "RelativePath")
+  if (!path) return null
+  return path.split("/").pop() || null
+}
+
 function parseSampleRef(clipSegment: string): AlsSampleRef | null {
   const sampleRef = readBlock(clipSegment, "SampleRef")
   if (!sampleRef) return null
@@ -293,8 +327,14 @@ function parseSampleRef(clipSegment: string): AlsSampleRef | null {
     ? sampleRef.body.slice(relativePath.end)
     : sampleRef.body
 
+  // Live 12 reference shape: there is no `<Name>`. The file is stated once,
+  // as `<Path Value="…">` (absolute most of the time), with a
+  // `<RelativePath Value="…">` beside it. Measured on sets saved by Live
+  // 12.4.3. `relativeDirs` stays empty there: that chain is a Live 10 concept.
+  const fileName = readString(afterPath, "Name") ?? fileNameFromPath(sampleRef.body)
+
   return {
-    fileName: readString(afterPath, "Name"),
+    fileName,
     relativeDirs,
     frames: readNumber(sampleRef.body, "DefaultDuration"),
     sampleRate: readNumber(sampleRef.body, "DefaultSampleRate"),
@@ -363,6 +403,11 @@ function parseSlots(listBody: string): ReadonlyArray<AlsClip | null> {
 }
 
 export function parseTracks(xml: string): readonly AlsTrack[] {
+  return tracksOf(normalizeSingleQuotedAttributes(xml))
+}
+
+/** `parseTracks` over a document whose quoting is already uniform. */
+function tracksOf(xml: string): readonly AlsTrack[] {
   const opens: Array<{ type: string; id: string; start: number }> = []
   TRACK_OPEN_RE.lastIndex = 0
   let match: RegExpExecArray | null
@@ -436,14 +481,17 @@ export function parseMasterTempo(xml: string): {
   return { tempo, timeSignatureId: readNumber(after, "Manual") }
 }
 
-export function parseAlsDocument(xml: string): AlsDocument {
-  const { schema, scenes } = parseScenes(xml)
+export function parseAlsDocument(rawXml: string): AlsDocument {
+  // One pass, then every reader below sees uniform quoting. Without it a
+  // scene named `INTERLUDE "B"` comes back with an empty name.
+  const xml = normalizeSingleQuotedAttributes(rawXml)
+  const { schema, scenes } = scenesOf(xml)
   const master = parseMasterTempo(xml)
   return {
     header: parseHeader(xml),
     sceneSchema: schema,
     scenes,
-    tracks: parseTracks(xml),
+    tracks: tracksOf(xml),
     masterTempo: master.tempo,
     masterTimeSignatureId: master.timeSignatureId,
     nextPointeeId: readNumber(xml, "NextPointeeId"),

@@ -51,7 +51,10 @@ describe("inspect", () => {
     expect(inspection.scenes).toHaveLength(12)
     expect(inspection.audioClips + inspection.midiClips).toBe(61)
     expect(inspection.gridConsistent).toBe(true)
-    expect(inspection.problems).toEqual([])
+    // The planted duplicate Ids: Live 12 would refuse this set as it is.
+    expect(inspection.problems.map((problem) => problem.code)).toEqual([
+      "duplicate_pointee_ids",
+    ])
     expect(inspection.convert).toEqual({ state: "ready" })
   })
 

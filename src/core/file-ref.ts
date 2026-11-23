@@ -214,11 +214,11 @@ export function relinkFileRefs(
     }
 
     const candidate = [root, ...dirs, name].join("/")
-    const encontrado = options.locate?.({ candidate, fileName: name }) ?? null
-    if (encontrado !== null && encontrado !== candidate) located++
+    const chosen = options.locate?.({ candidate, fileName: name }) ?? null
+    if (chosen !== null && chosen !== candidate) located++
     const replacement = writeV10FileRef({
       attributes,
-      absolutePath: encontrado ?? candidate,
+      absolutePath: chosen ?? candidate,
       type: readValue(body, "Type") ?? "2",
       fileSize: readValue(body, "FileSize") ?? "0",
       crc: readValue(body, "Crc") ?? "0",

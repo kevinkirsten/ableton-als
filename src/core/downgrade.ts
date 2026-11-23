@@ -20,7 +20,11 @@ import {
   FILE_REF,
   writeV10FileRef,
 } from "./file-ref.js"
-import { decodeTimeSignatureId, unescapeXml } from "./document.js"
+import {
+  decodeTimeSignatureId,
+  normalizeSingleQuotedAttributes,
+  unescapeXml,
+} from "./document.js"
 import {
   applyEdits,
   escapeXml,
@@ -208,14 +212,6 @@ export function downgradeToV10(
  * `&quot;` — which is exactly how Live 10 writes those values. The content of
  * `<Data>`/`<Buffer>` (pure hex, no `=`) is not affected.
  */
-function normalizeSingleQuotedAttributes(xml: string): string {
-  return xml.replace(
-    /([\w.:-]+)='([^']*)'/g,
-    (_, attribute: string, value: string) =>
-      `${attribute}="${value.replace(/"/g, "&quot;")}"`
-  )
-}
-
 /**
  * Parents whose `Color` uses the shifted index in v10: tracks, rack chains
  * (`DrumBranch` measured on the golden pair; the siblings are the same color

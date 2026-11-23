@@ -11,6 +11,7 @@ import {
   findSceneRanges,
   maxElementId,
 } from "./surgery.js"
+import { detectVersion, inspectPointeeIds } from "./tools.js"
 
 /**
  * A stable identifier for each message this module can produce.
@@ -49,6 +50,16 @@ type Problem<
 export type ValidationProblem =
   /** Clip automation pointing at a target that does not exist. */
   | Problem<"ids", "orphan_pointee", { readonly ids: string }>
+  /**
+   * Two automation or modulation targets sharing one Id, in a Live 11 or
+   * later document: that Live refuses the set ("non-unique Pointee Ids").
+   * `fixPointeeIds` repairs it.
+   */
+  | Problem<
+      "ids",
+      "duplicate_pointee_ids",
+      { readonly count: number; readonly ids: string }
+    >
   /** A ClipSlotList whose slot count does not match the scene count. */
   | Problem<
       "grid",
@@ -111,6 +122,7 @@ export function validateGeneratedSet(
     ...checkXmlWellFormed(xml),
     ...checkGrid(xml),
     ...checkIds(xml),
+    ...checkDuplicateTargets(xml),
     ...checkTrackReferences(xml),
     ...checkSingletonMembers(xml),
     ...checkPointeeReferences(xml),
@@ -316,6 +328,30 @@ function checkIds(xml: string): readonly ValidationProblem[] {
 }
 
 /** Bus routing that points at a nonexistent track changes the audio without warning. */
+/**
+ * Duplicated automation target Ids. Reported only for Live 11 and later
+ * documents, because that is where the refusal was observed. Live 10 archives
+ * carry such duplicates and open, so flagging them there would reject sets
+ * that work.
+ */
+function checkDuplicateTargets(xml: string): readonly ValidationProblem[] {
+  const major = detectVersion(xml).major
+  if (major === null || major < 11) return []
+  const duplicated = inspectPointeeIds(xml).duplicatedIds
+  if (duplicated.length === 0) return []
+  const shown = duplicated.slice(0, 8).join(", ")
+  const ids =
+    duplicated.length > 8 ? `${shown}, +${duplicated.length - 8} more` : shown
+  return [
+    {
+      rule: "ids",
+      code: "duplicate_pointee_ids",
+      values: { count: duplicated.length, ids },
+      detail: `${duplicated.length} automation target Id(s) are used more than once (${ids}); Live 11 and later refuse a set whose Ids are not unique`,
+    },
+  ]
+}
+
 function checkTrackReferences(xml: string): readonly ValidationProblem[] {
   const trackIds = new Set(
     [

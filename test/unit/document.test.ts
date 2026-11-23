@@ -237,6 +237,128 @@ describe("parseScenes", () => {
   })
 })
 
+describe("single-quoted attributes", () => {
+  // Ableton writes an attribute in single quotes when the value holds a
+  // double quote. Seen in sets saved by Live 12.4.3 (60 such attributes in
+  // one song file) and in the Live 10 golden pair.
+  it("reads a v12 scene name that holds double quotes", () => {
+    const v12 = `<Scenes>
+      <Scene Id="10">
+        <Name Value='INTERLUDE "B"' />
+        <Color Value="13" />
+        <Tempo Value="120" />
+        <IsTempoEnabled Value="true" />
+        <TimeSignatureId Value="201" />
+      </Scene>
+      <Scene Id="11">
+        <Name Value="PLAIN" />
+        <Color Value="8" />
+      </Scene>
+    </Scenes>`
+    const { scenes } = parseScenes(v12)
+    expect(scenes.map((scene) => scene.rawName)).toEqual([
+      'INTERLUDE "B"',
+      "PLAIN",
+    ])
+    expect(scenes[0]!.tempo).toBe(120)
+  })
+
+  it("reads a v10 scene name that holds double quotes", () => {
+    const v10 = `<SceneNames>
+      <Scene Id="1" Value='"death could not" 4/4;120 BPM' />
+      <Scene Id="2" Value="PLAIN" />
+    </SceneNames>`
+    const { schema, scenes } = parseScenes(v10)
+    expect(schema).toBe("v10")
+    expect(scenes[0]!.rawName).toBe('"death could not" 4/4;120 BPM')
+  })
+
+  it("reads a single-quoted track name through the whole-document reader", () => {
+    const xml = V10_XML.replace(
+      /<EffectiveName Value="[^"]*"/,
+      `<EffectiveName Value='THE "MAIN" BUS'`
+    )
+    expect(parseAlsDocument(xml).tracks[0]!.name).toBe('THE "MAIN" BUS')
+  })
+})
+
+describe("sample reference in the Live 12 shape", () => {
+  // Structure copied from a set saved by Live 12.4.3, values replaced: there
+  // is no `<Name>` and no element list, only `<RelativePath Value>` and
+  // `<Path Value>`. Checked against eight real Live 12.4.3 song files, where
+  // every one of 2,411 audio clips now reports its file name.
+  const clip = `
+    <AudioClip Id="1" Time="0">
+      <Loop>
+        <LoopStart Value="0" />
+        <LoopEnd Value="16" />
+        <LoopOn Value="false" />
+      </Loop>
+      <Name Value="KEYS STEM" />
+      <IsWarped Value="true" />
+      <SampleRef>
+        <FileRef>
+          <RelativePathType Value="1" />
+          <RelativePath Value="../../Stems/Keys &amp; Pads/keys_stem.wav" />
+          <Path Value="/Volumes/Demo SSD/Library/Stems/Keys &amp; Pads/keys_stem.wav" />
+          <Type Value="2" />
+          <LivePackName Value="" />
+          <LivePackId Value="" />
+          <OriginalFileSize Value="57297100" />
+          <OriginalCrc Value="38780" />
+          <SourceHint Value="" />
+        </FileRef>
+        <LastModDate Value="1673992979" />
+        <SourceContext />
+        <SampleUsageHint Value="0" />
+        <DefaultDuration Value="9498947" />
+        <DefaultSampleRate Value="48000" />
+        <SamplesToAutoWarp Value="0" />
+      </SampleRef>
+      <WarpMarkers>
+        <WarpMarker Id="2" SecTime="0" BeatTime="0" />
+        <WarpMarker Id="3" SecTime="0.015625" BeatTime="0.03125" />
+      </WarpMarkers>
+    </AudioClip>`
+
+  const document = (body: string): string =>
+    `<Ableton MajorVersion="5" MinorVersion="12.0_12402" Creator="Ableton Live 12.4.3">
+      <LiveSet><Tracks>${audioTrack({
+        id: 20,
+        name: "KEYS",
+        color: 3,
+        target: "AudioOut/Main",
+        clips: [body],
+      })}</Tracks>
+      <MainTrack><Tempo><Manual Value="120" /></Tempo></MainTrack>
+      <Scenes><Scene Id="1"><Name Value="A" /></Scene></Scenes></LiveSet></Ableton>`
+
+  it("takes the file name from <Path>, and leaves the Live 10 dir chain empty", () => {
+    const sample = parseAlsDocument(document(clip)).tracks[0]!.sessionClips[0]!
+      .sample!
+    expect(sample.fileName).toBe("keys_stem.wav")
+    expect(sample.relativeDirs).toEqual([])
+    expect(sample.frames).toBe(9498947)
+    expect(sample.sampleRate).toBe(48000)
+  })
+
+  it("falls back to <RelativePath> when <Path> is empty", () => {
+    const relativeOnly = clip.replace(/<Path Value="[^"]*" \/>/, '<Path Value="" />')
+    const sample = parseAlsDocument(document(relativeOnly)).tracks[0]!
+      .sessionClips[0]!.sample!
+    expect(sample.fileName).toBe("keys_stem.wav")
+  })
+
+  it("still reports no name for a reference that states no file", () => {
+    const empty = clip
+      .replace(/<Path Value="[^"]*" \/>/, '<Path Value="" />')
+      .replace(/<RelativePath Value="[^"]*" \/>/, '<RelativePath Value="" />')
+    const sample = parseAlsDocument(document(empty)).tracks[0]!.sessionClips[0]!
+      .sample!
+    expect(sample.fileName).toBeNull()
+  })
+})
+
 describe("parseAlsDocument", () => {
   const document = parseAlsDocument(V10_XML)
 

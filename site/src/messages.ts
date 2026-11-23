@@ -23,6 +23,8 @@ const plural = (count: number, one: string, other: string): string =>
 const WORDING: Wording = {
   orphan_pointee: ({ ids }) =>
     `Clip automation points at target Id ${ids}, which does not exist in this set. Live crashes resolving it while the set loads.`,
+  duplicate_pointee_ids: ({ count, ids }) =>
+    `${count} automation target ${plural(count, "Id is", "Ids are")} used more than once: ${ids}. Live 11 and later refuse a set whose Ids are not unique. The repair "Duplicate automation Ids" fixes this.`,
   grid_slot_count: ({ list, track, slots, scenes }) =>
     `Clip slot list ${list}, on ${track === "" ? "the master track" : `track ${track}`}, has ${slots} ${plural(slots, "slot", "slots")} for ${scenes} ${plural(scenes, "scene", "scenes")}. Every list needs exactly one slot per scene.`,
   grid_group_slot_count: ({ group, slots, scenes }) =>

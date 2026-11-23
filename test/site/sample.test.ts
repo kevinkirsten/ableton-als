@@ -281,8 +281,27 @@ describe("healthy sample: audio references", () => {
 })
 
 describe("healthy sample: integrity", () => {
-  it("passes validateGeneratedSet with zero problems", () => {
-    expect(validateGeneratedSet(sample)).toEqual([])
+  it("has one validation problem, the planted duplicate Ids, and no other", () => {
+    expect(
+      validateGeneratedSet(sample).map(({ rule, code, values }) => ({
+        rule,
+        code,
+        values,
+      }))
+    ).toEqual([
+      {
+        rule: "ids",
+        code: "duplicate_pointee_ids",
+        values: { count: 6, ids: "2030, 2031, 2032, 2033, 2034, 2035" },
+      },
+    ])
+  })
+
+  it("validates clean once the duplicates are renumbered", () => {
+    const fixed = fixPointeeIds(sample)
+    expect(fixed.ok).toBe(true)
+    if (!fixed.ok) return
+    expect(validateGeneratedSet(fixed.xml)).toEqual([])
   })
 
   it("has a consistent grid", () => {
@@ -338,7 +357,10 @@ describe("planted problem b: clips warped at another BPM", () => {
     const after = inspectRewarp(outcome.xml)
     expect(after.gridBpm).toBe(after.masterBpm)
     expect(after.byBpm).toEqual([[120, 55]])
-    expect(validateGeneratedSet(outcome.xml)).toEqual([])
+    // Rewarping adds no problem of its own: the duplicates are still there.
+    expect(
+      validateGeneratedSet(outcome.xml).map((problem) => problem.code)
+    ).toEqual(["duplicate_pointee_ids"])
   })
 })
 
@@ -658,6 +680,11 @@ describe("damaged sample", () => {
         rule: "ids",
         code: "next_pointee_too_low",
         values: { declared: "900", max: 2104 },
+      },
+      {
+        rule: "ids",
+        code: "duplicate_pointee_ids",
+        values: { count: 6, ids: "2030, 2031, 2032, 2033, 2034, 2035" },
       },
       {
         rule: "routing",

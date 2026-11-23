@@ -135,6 +135,32 @@ describe("validateGeneratedSet", () => {
     ).toContain("missing")
   })
 
+  it("duplicated automation target Ids are caught in a Live 12 document, which that Live refuses", () => {
+    const targets = `<Mixer><Volume><AutomationTarget Id="700" /></Volume><Pan><AutomationTarget Id="700" /></Pan><Speaker><ModulationTarget Id="701" /></Speaker></Mixer>`
+    const v12 = buildDocument({ extra: targets }).replace(
+      'MinorVersion="10.0_377" Creator="Ableton Live 10.1.43"',
+      'MinorVersion="12.0_12402" Creator="Ableton Live 12.4.3"'
+    )
+    const problems = validateGeneratedSet(v12).filter(
+      (problem) => problem.code === "duplicate_pointee_ids"
+    )
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatchObject({
+      rule: "ids",
+      values: { count: 1, ids: "700" },
+    })
+    expect(problems[0]!.detail).toContain("700")
+  })
+
+  it("the same duplicates in a Live 10 document are NOT flagged: Live 10 archives carry them and open", () => {
+    const targets = `<Mixer><Volume><AutomationTarget Id="700" /></Volume><Pan><AutomationTarget Id="700" /></Pan></Mixer>`
+    expect(
+      validateGeneratedSet(buildDocument({ extra: targets })).map(
+        (problem) => problem.code
+      )
+    ).not.toContain("duplicate_pointee_ids")
+  })
+
   it("an orphan PointeeId is caught — the reference crashes Live 10 at load", () => {
     const orphan = buildDocument({
       extra: `<EnvelopeTarget><PointeeId Value="777" /></EnvelopeTarget>`,
