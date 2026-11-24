@@ -280,6 +280,18 @@ describe("single-quoted attributes", () => {
     )
     expect(parseAlsDocument(xml).tracks[0]!.name).toBe('THE "MAIN" BUS')
   })
+
+  it("stays linear on a long run of name characters (no ReDoS)", () => {
+    // A crafted upload: one megabyte of word characters, then a single
+    // single-quoted attribute so the normalizer cannot skip the document.
+    // The old pattern rescanned the run from every position (quadratic).
+    const xml = `<X>${"a".repeat(1_000_000)}</X>
+      <SceneNames><Scene Id="1" Value='"Q" [2]' /></SceneNames>`
+    const started = performance.now()
+    const { scenes } = parseScenes(xml)
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(scenes[0]!.rawName).toBe('"Q" [2]')
+  })
 })
 
 describe("sample reference in the Live 12 shape", () => {

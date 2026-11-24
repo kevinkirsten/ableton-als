@@ -113,10 +113,14 @@ const XML_ENTITIES: Record<string, string> = {
 export function normalizeSingleQuotedAttributes(xml: string): string {
   // Most documents have none; skip the pass over tens of megabytes.
   if (!xml.includes("='")) return xml
+  // The leading whitespace is what keeps this linear. Without it, a long run
+  // of name characters with no `='` after it is rescanned from every starting
+  // position (quadratic: 80,000 characters took 3 s). An attribute always
+  // follows whitespace inside a tag, so requiring it changes no real match.
   return xml.replace(
-    /([\w.:-]+)='([^']*)'/g,
-    (_, attribute: string, value: string) =>
-      `${attribute}="${value.replace(/"/g, "&quot;")}"`
+    /(\s)([\w.:-]+)='([^']*)'/g,
+    (_, space: string, attribute: string, value: string) =>
+      `${space}${attribute}="${value.replace(/"/g, "&quot;")}"`
   )
 }
 
